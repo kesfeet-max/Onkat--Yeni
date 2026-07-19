@@ -109,10 +109,18 @@ export function CustomerPanel() {
     if (!manualCode.trim()) return;
 
     try {
-      // Manual code - esnafın söylediği 3 haneli kod
-      const storeId = parseInt(manualCode.trim());
+      const storeId = manualCode.trim();
       const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/merchant-get?store_id=${storeId}`;
-      const response = await fetch(apiUrl);
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY;
+      
+      const response = await fetch(apiUrl, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+        }
+      });
       const data = await response.json();
 
       if (response.ok && data.success) {
@@ -126,7 +134,7 @@ export function CustomerPanel() {
         setShowScanner(false);
         setManualCode('');
       } else {
-        setMessage({ type: 'error', text: 'Geçersiz mağaza kodu' });
+        setMessage({ type: 'error', text: data.error || 'Geçersiz mağaza kodu' });
       }
     } catch (err) {
       setMessage({ type: 'error', text: 'Kod kontrol edilemedi' });

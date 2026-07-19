@@ -14,7 +14,6 @@ import {
   EyeOff,
   CheckCircle,
 } from 'lucide-react';
-import { supabase } from '../lib/supabase';
 import { cleanPhoneNumber, getCurrentLocation } from '../lib/utils';
 import type { UserRole } from '../types';
 
@@ -167,8 +166,9 @@ export function RegisterPage() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="flex flex-col gap-5">
-            <div className="bg-gray-50 p-4 rounded-xl">
+          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+            {/* Ad Soyad */}
+            <div className="bg-gray-50 p-4 rounded-xl" style={{ display: 'block', visibility: 'visible' }}>
               <label className="block text-sm font-semibold text-gray-800 mb-2">
                 Ad Soyad <span className="text-red-500">*</span>
               </label>
@@ -185,25 +185,8 @@ export function RegisterPage() {
               </div>
             </div>
 
-            <div className="bg-gray-50 p-4 rounded-xl">
-              <label className="block text-sm font-semibold text-gray-800 mb-2">
-                E-posta Adresi <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
-                <input
-                  type="email"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  required
-                  className="w-full pl-12 pr-4 py-3 rounded-xl border-2 border-gray-300 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-gray-900"
-                  placeholder="ornek@email.com"
-                />
-              </div>
-              <p className="text-xs text-gray-600 mt-2 font-medium">Şifre sıfırlama için kullanılacak</p>
-            </div>
-
-            <div className="bg-gray-50 p-4 rounded-xl">
+            {/* Telefon */}
+            <div className="bg-gray-50 p-4 rounded-xl" style={{ display: 'block', visibility: 'visible' }}>
               <label className="block text-sm font-semibold text-gray-800 mb-2">
                 Telefon Numarası <span className="text-red-500">*</span>
               </label>
@@ -220,7 +203,30 @@ export function RegisterPage() {
               </div>
             </div>
 
-            <div className="bg-gray-50 p-4 rounded-xl">
+            {/* E-posta */}
+            <div className="bg-gray-50 p-4 rounded-xl" style={{ display: 'block', visibility: 'visible' }}>
+              <label className="block text-sm font-semibold text-gray-800 mb-2">
+                E-posta Adresi <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
+                <input
+                  type="email"
+                  id="register-email"
+                  name="email"
+                  value={formData.email}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  required
+                  autoComplete="email"
+                  className="w-full pl-12 pr-4 py-3 rounded-xl border-2 border-gray-300 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-gray-900"
+                  placeholder="ornek@email.com"
+                />
+              </div>
+              <p className="text-xs text-gray-600 mt-2 font-medium">Şifre sıfırlama için kullanılacak</p>
+            </div>
+
+            {/* Şifre */}
+            <div className="bg-gray-50 p-4 rounded-xl" style={{ display: 'block', visibility: 'visible' }}>
               <label className="block text-sm font-semibold text-gray-800 mb-2">
                 Şifre <span className="text-red-500">*</span>
               </label>
