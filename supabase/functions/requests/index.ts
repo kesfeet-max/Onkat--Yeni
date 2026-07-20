@@ -37,7 +37,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const url = new URL(req.url);
-    const action = url.searchParams.get('action');
+    let action = url.searchParams.get('action');
 
     // GET: List requests
     if (req.method === 'GET') {
@@ -77,6 +77,15 @@ Deno.serve(async (req: Request) => {
     // POST: Create or manage requests
     if (req.method === 'POST') {
       const body = await req.json();
+
+      // Auto-detect action from body if not in URL
+      if (!action) {
+        if (body.store_id || body.merchant_id) {
+          action = 'create';
+        } else if (body.request_id && body.response) {
+          action = 'respond';
+        }
+      }
 
       // Customer creates a request
       if (action === 'create') {

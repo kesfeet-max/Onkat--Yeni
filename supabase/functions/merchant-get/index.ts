@@ -78,54 +78,44 @@ Deno.serve(async (req: Request) => {
     let queryError = null;
 
     if (storeId) {
-      // Search by store_id column only
+      // Search by store_id column - try both integer and text forms
       console.log('[merchant-get] Searching by store_id:', storeId);
       
-      // Try exact match as text
+      const parsedId = parseInt(storeId);
+      const searchValue = !isNaN(parsedId) ? parsedId : storeId;
+      
+      console.log('[merchant-get] Using search value:', searchValue, 'type:', typeof searchValue);
+
+      // Primary search with parsed value
       const { data: result, error: err } = await supabase
         .from('merchants')
         .select('id, store_id, store_name, city, district, sector, latitude, longitude, is_active, points_rate, cash_points_rate, card_points_rate')
-        .eq('store_id', storeId)
+        .eq('store_id', searchValue)
         .maybeSingle();
 
-      console.log('[merchant-get] store_id text search - result:', JSON.stringify(result), 'error:', JSON.stringify(err));
+      console.log('[merchant-get] Primary search - result:', JSON.stringify(result), 'error:', JSON.stringify(err));
 
       if (result) {
         merchant = result;
-      } else if (!err) {
-        // Try as integer if text didn't match
-        const parsedId = parseInt(storeId);
-        if (!isNaN(parsedId)) {
-          console.log('[merchant-get] Trying store_id as integer:', parsedId);
-          const { data: intResult, error: intErr } = await supabase
-            .from('merchants')
-            .select('id, store_id, store_name, city, district, sector, latitude, longitude, is_active, points_rate, cash_points_rate, card_points_rate')
-            .eq('store_id', parsedId)
-            .maybeSingle();
-
-          console.log('[merchant-get] store_id int search - result:', JSON.stringify(intResult), 'error:', JSON.stringify(intErr));
-          merchant = intResult;
-          queryError = intErr;
-        }
-      } else {
+      } else if (err) {
         queryError = err;
       }
 
-      // Last resort: try filter with ::text cast via ilike
-      if (!merchant && !queryError) {
-        console.log('[merchant-get] Trying ilike fallback for store_id:', storeId);
-        const { data: ilikeResult, error: ilikeErr } = await supabase
+      // Fallback: try as string if integer search failed
+      if (!merchant && !queryError && typeof searchValue === 'number') {
+        console.log('[merchant-get] Fallback: trying as string:', storeId);
+        const { data: strResult, error: strErr } = await supabase
           .from('merchants')
           .select('id, store_id, store_name, city, district, sector, latitude, longitude, is_active, points_rate, cash_points_rate, card_points_rate')
-          .filter('store_id::text', 'eq', storeId)
+          .eq('store_id', storeId)
           .maybeSingle();
 
-        console.log('[merchant-get] filter cast search - result:', JSON.stringify(ilikeResult), 'error:', JSON.stringify(ilikeErr));
+        console.log('[merchant-get] String fallback - result:', JSON.stringify(strResult), 'error:', JSON.stringify(strErr));
         
-        if (ilikeResult) {
-          merchant = ilikeResult;
+        if (strResult) {
+          merchant = strResult;
         } else {
-          queryError = ilikeErr;
+          queryError = strErr;
         }
       }
     } else if (id) {

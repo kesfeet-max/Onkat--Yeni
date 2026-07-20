@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { supabase } from '../lib/supabase';
-import { generateIdempotencyKey, getCurrentLocation, formatCurrency, formatDate } from '../lib/utils';
+import { formatCurrency, formatDate } from '../lib/utils';
 import type { TransactionWithDetails } from '../types';
 
 type TabType = 'panel' | 'magazalar' | 'gecmis';
@@ -38,7 +38,6 @@ export function CustomerPanel() {
   const [transactions, setTransactions] = useState<TransactionWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
   const [storeCode, setStoreCode] = useState('');
-  const [requestAmount, setRequestAmount] = useState('');
   const [processing, setProcessing] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [visitedStores, setVisitedStores] = useState<VisitedStore[]>([]);
@@ -91,7 +90,7 @@ export function CustomerPanel() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
 
-      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/requests?status=pending`;
+      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/requests`;
       const response = await fetch(apiUrl, {
         method: 'GET',
         headers: {
@@ -102,7 +101,7 @@ export function CustomerPanel() {
 
       const data = await response.json();
       if (response.ok) {
-        setPendingRequests(data.requests || []);
+        setPendingRequests((data.requests || []).filter((r: any) => r.status === 'pending'));
       }
     } catch (err) {
       console.error('Error fetching requests:', err);
@@ -152,31 +151,14 @@ export function CustomerPanel() {
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-
-      // First find the merchant by store code
-      const merchantUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/merchant-get?store_id=${storeCode.trim()}`;
-      const merchantResponse = await fetch(merchantUrl, {
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-        },
-      });
-
-      const merchantData = await merchantResponse.json();
-
-      if (!merchantResponse.ok || !merchantData.success) {
-        setMessage({ type: 'error', text: merchantData.error || 'Geçersiz mağaza kodu' });
+      if (!session) {
+        setMessage({ type: 'error', text: 'Oturum bulunamadı, lütfen tekrar giriş yapın' });
         setProcessing(false);
         return;
       }
 
-      const location = await getCurrentLocation();
-      const idempotencyKey = generateIdempotencyKey();
-
-      // Send point request to the merchant
-      const requestUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/requests`;
+      // Send point request directly to requests edge function with action=create
+      const requestUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/requests?action=create`;
       const response = await fetch(requestUrl, {
         method: 'POST',
         headers: {
@@ -184,26 +166,33 @@ export function CustomerPanel() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          merchant_id: merchantData.merchant.id,
-          store_id: merchantData.merchant.store_id,
-          amount: parseFloat(requestAmount) || 0,
-          location: location || undefined,
-          idempotency_key: idempotencyKey,
+          store_id: storeCode.trim(),
+          amount: 0, // Müşteri tutar girmez, esnaf onaylarken girer
+          payment_type: 'cash',
         }),
       });
 
       const data = await response.json();
 
       if (response.ok && data.success) {
-        setMessage({ type: 'success', text: `Puan talebi "${merchantData.merchant.store_name}" mağazasına gönderildi! Esnaf onayını bekleyin.` });
+        setMessage({ type: 'success', text: `Puan talebi "${data.merchant_name}" mağazasına gönderildi! Esnaf onayını bekleyin.` });
         setStoreCode('');
-        setRequestAmount('');
         fetchPendingRequests();
+        refreshProfile();
       } else {
-        setMessage({ type: 'error', text: data.error || 'Talep gönderilemedi' });
+        // Daha anlaşılır hata mesajları
+        let errorText = data.error || 'Talep gönderilemedi';
+        if (errorText.includes('bulunamadi') || errorText.includes('Gecersiz magaza')) {
+          errorText = 'Bu mağaza kodu bulunamadı. Lütfen esnaftan doğru kodu alın.';
+        } else if (errorText.includes('15 dakika')) {
+          errorText = 'Aynı mağazaya 15 dakika içinde tekrar talep gönderemezsiniz.';
+        } else if (errorText.includes('askiya')) {
+          errorText = 'Hesabınız geçici olarak askıya alındı.';
+        }
+        setMessage({ type: 'error', text: errorText });
       }
     } catch (err) {
-      setMessage({ type: 'error', text: 'İşlem sırasında hata oluştu' });
+      setMessage({ type: 'error', text: 'Bağlantı hatası. Lütfen tekrar deneyin.' });
     } finally {
       setProcessing(false);
     }
@@ -331,7 +320,7 @@ export function CustomerPanel() {
               </div>
             </div>
 
-            {/* Puan Talebi Gönder */}
+            {/* Puan Talebi Gönder - SADECE MAĞAZA KODU */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
               <div className="flex items-center gap-3 mb-5">
                 <div className="w-10 h-10 rounded-xl bg-secondary-100 flex items-center justify-center">
@@ -339,7 +328,7 @@ export function CustomerPanel() {
                 </div>
                 <div>
                   <h2 className="font-heading font-semibold text-gray-900">Puan Talebi Gönder</h2>
-                  <p className="text-xs text-gray-500">Esnafın size söylediği 3 haneli kodu girin</p>
+                  <p className="text-xs text-gray-500">Esnafın size söylediği mağaza kodunu girin</p>
                 </div>
               </div>
 
@@ -350,32 +339,24 @@ export function CustomerPanel() {
                     type="text"
                     value={storeCode}
                     onChange={(e) => setStoreCode(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-lg text-center tracking-widest font-mono"
+                    className="w-full px-4 py-4 rounded-xl border border-gray-300 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-2xl text-center tracking-[0.3em] font-mono font-bold"
                     placeholder="• • •"
                     maxLength={6}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && storeCode.trim()) {
+                        handleSendPointRequest();
+                      }
+                    }}
                   />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Alışveriş Tutarı (TL)</label>
-                  <div className="relative">
-                    <input
-                      type="number"
-                      value={requestAmount}
-                      onChange={(e) => setRequestAmount(e.target.value)}
-                      className="w-full px-4 py-3 pr-12 rounded-xl border border-gray-300 focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
-                      placeholder="0.00"
-                      min="0"
-                      step="0.01"
-                    />
-                    <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 font-medium">₺</span>
-                  </div>
+                  <p className="text-xs text-gray-400 mt-2 text-center">
+                    Alışveriş yaptığınız esnaftan mağaza kodunu isteyin
+                  </p>
                 </div>
 
                 <button
                   onClick={handleSendPointRequest}
                   disabled={processing || !storeCode.trim()}
-                  className="w-full py-4 rounded-xl font-semibold bg-primary-600 text-white hover:bg-primary-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                  className="w-full py-4 rounded-xl font-semibold bg-primary-600 text-white hover:bg-primary-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 text-lg"
                 >
                   {processing ? (
                     <>
@@ -406,7 +387,9 @@ export function CustomerPanel() {
                   {pendingRequests.map((req: any) => (
                     <div key={req.id} className="bg-white rounded-lg p-3 flex items-center justify-between">
                       <div>
-                        <p className="text-sm font-medium text-gray-900">{req.store_name || 'Mağaza'}</p>
+                        <p className="text-sm font-medium text-gray-900">
+                          {req.merchants?.store_name || 'Mağaza'}
+                        </p>
                         <p className="text-xs text-gray-500">{formatDate(req.created_at)}</p>
                       </div>
                       <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-1 rounded-full font-medium">
@@ -433,6 +416,7 @@ export function CustomerPanel() {
                 {transactions.length === 0 ? (
                   <div className="p-8 text-center text-gray-500">
                     <p>Henüz işlem yok</p>
+                    <p className="text-sm mt-1">İlk puan talebinizi gönderin!</p>
                   </div>
                 ) : (
                   transactions.slice(0, 5).map((tx) => (
@@ -450,7 +434,9 @@ export function CustomerPanel() {
                           }`}>
                             {tx.type === 'earn' ? '+' : '-'}{tx.points} TL
                           </p>
-                          <p className="text-xs text-gray-500">{formatCurrency(tx.amount)}</p>
+                          {tx.amount > 0 && (
+                            <p className="text-xs text-gray-500">{formatCurrency(tx.amount)}</p>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -567,7 +553,9 @@ export function CustomerPanel() {
                           }`}>
                             {tx.type === 'earn' ? '+' : '-'}{tx.points} TL
                           </p>
-                          <p className="text-xs text-gray-500">{formatCurrency(tx.amount)}</p>
+                          {tx.amount > 0 && (
+                            <p className="text-xs text-gray-500">{formatCurrency(tx.amount)}</p>
+                          )}
                         </div>
                       </div>
                       {tx.status === 'cancelled' && (
