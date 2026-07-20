@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Handshake,
@@ -15,7 +15,7 @@ import {
   Store,
   XCircle,
   Settings,
-  RefreshCw,
+
   Bell,
   Calendar,
   Check,
@@ -55,7 +55,6 @@ export function MerchantPanel() {
   const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
   const [showQRModal, setShowQRModal] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [storeCode, setStoreCode] = useState<string>('');
   const [cashPointsRate, setCashPointsRate] = useState<number>(7);
   const [cardPointsRate, setCardPointsRate] = useState<number>(5);
   const [savingRate, setSavingRate] = useState(false);
@@ -69,10 +68,7 @@ export function MerchantPanel() {
 
   const merchant = profile as any;
 
-  const generateStoreCode = useCallback(() => {
-    const code = Math.floor(Math.random() * 900 + 100).toString();
-    setStoreCode(code);
-  }, []);
+
 
   useEffect(() => {
     if (!user) {
@@ -82,10 +78,7 @@ export function MerchantPanel() {
     fetchTransactions();
     fetchMerchantData();
     fetchRequests();
-    generateStoreCode();
-    const interval = setInterval(generateStoreCode, 25000);
-    return () => clearInterval(interval);
-  }, [user, navigate, generateStoreCode]);
+  }, [user, navigate]);
 
   useEffect(() => {
     const pollInterval = setInterval(fetchRequests, 10000);
@@ -207,7 +200,7 @@ export function MerchantPanel() {
 
   const generateQR = async () => {
     if (!merchant?.store_id) return;
-    const qrData = JSON.stringify({ store_id: merchant.store_id, code: storeCode, type: 'merchant_qr' });
+    const qrData = JSON.stringify({ store_id: merchant.store_id, type: 'merchant_qr' });
     try {
       const url = await QRCode.toDataURL(qrData, { width: 300, margin: 2, color: { dark: '#1a5f4a', light: '#ffffff' } });
       setQrCodeUrl(url);
@@ -406,20 +399,13 @@ export function MerchantPanel() {
               <div className="flex items-center justify-between flex-wrap gap-4">
                 <div>
                   <h3 className="text-lg font-heading font-semibold mb-1">Magaza Kodu</h3>
-                  <p className="text-sm text-primary-200">Bu kodu musteriye soyleyin</p>
+                  <p className="text-sm text-primary-200">Sabit magaza kodunuz</p>
                 </div>
                 <div className="flex items-center gap-4">
                   <div className="bg-white/20 backdrop-blur-sm px-8 py-4 rounded-xl border border-white/30">
-                    <p className="text-4xl font-heading font-bold tracking-widest">{storeCode}</p>
+                    <p className="text-4xl font-heading font-bold tracking-widest">{merchant?.store_id || '---'}</p>
                   </div>
-                  <button onClick={generateStoreCode} className="p-3 bg-white/20 rounded-xl hover:bg-white/30 transition-colors" title="Yeni Kod">
-                    <RefreshCw className="w-6 h-6" />
-                  </button>
                 </div>
-              </div>
-              <div className="mt-4 flex items-center gap-2 text-primary-200 text-sm">
-                <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-                <span>Kod her 25 saniyede otomatik degisir</span>
               </div>
             </div>
 

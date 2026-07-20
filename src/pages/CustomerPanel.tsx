@@ -328,7 +328,7 @@ export function CustomerPanel() {
                 </div>
                 <div>
                   <h2 className="font-heading font-semibold text-gray-900">Puan Talebi Gönder</h2>
-                  <p className="text-xs text-gray-500">Esnafın size söylediği mağaza kodunu girin</p>
+
                 </div>
               </div>
 
