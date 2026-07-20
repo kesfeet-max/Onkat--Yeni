@@ -3,160 +3,91 @@ import { createClient } from 'npm:@supabase/supabase-js@2.57.4';
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
-    return new Response(null, {
-      status: 200,
-      headers: corsHeaders,
-    });
-  }
-
-  if (req.method !== "GET") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), {
-      status: 405,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(null, { status: 200, headers: corsHeaders });
   }
 
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
-    console.log('[merchant-get] SUPABASE_URL:', supabaseUrl);
-    console.log('[merchant-get] SERVICE_KEY exists:', !!supabaseServiceKey);
-    console.log('[merchant-get] SERVICE_KEY length:', supabaseServiceKey?.length);
-
     const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
+      auth: { autoRefreshToken: false, persistSession: false },
     });
 
     const url = new URL(req.url);
-    const storeId = url.searchParams.get('store_id');
-    const id = url.searchParams.get('id');
-    const debug = url.searchParams.get('debug');
+    const storeIdParam = url.searchParams.get('store_id');
 
-    console.log('[merchant-get] Params - store_id:', storeId, 'id:', id, 'debug:', debug);
-
-    // Debug mode: list all merchants in the table
-    if (debug === 'true') {
-      const { data: allMerchants, error: listError } = await supabase
-        .from('merchants')
-        .select('*')
-        .limit(20);
-
-      console.log('[merchant-get] DEBUG - All merchants:', JSON.stringify(allMerchants));
-      console.log('[merchant-get] DEBUG - List error:', JSON.stringify(listError));
-
-      return new Response(JSON.stringify({
-        debug: true,
-        merchants_count: allMerchants?.length || 0,
-        merchants: allMerchants || [],
-        list_error: listError,
-        supabase_url: supabaseUrl,
-        service_key_length: supabaseServiceKey?.length || 0,
-      }), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+    if (!storeIdParam || !storeIdParam.trim()) {
+      return new Response(JSON.stringify({ error: 'store_id parametresi gerekli' }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    if (!storeId && !id) {
-      return new Response(JSON.stringify({ error: 'store_id veya id gerekli' }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    const cleanCode = storeIdParam.trim();
+
+    // UUID format check
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanCode);
+    const parsedInt = parseInt(cleanCode);
+    const isNumeric = !isNaN(parsedInt) && String(parsedInt) === cleanCode;
 
     let merchant = null;
-    let queryError = null;
 
-    if (storeId) {
-      // Search by store_id column - try both integer and text forms
-      console.log('[merchant-get] Searching by store_id:', storeId);
-      
-      const parsedId = parseInt(storeId);
-      const searchValue = !isNaN(parsedId) ? parsedId : storeId;
-      
-      console.log('[merchant-get] Using search value:', searchValue, 'type:', typeof searchValue);
-
-      // Primary search with parsed value
-      const { data: result, error: err } = await supabase
+    // Strategy 1: Direct .eq query on store_id (handles both integer and text)
+    {
+      const { data } = await supabase
         .from('merchants')
-        .select('id, store_id, store_name, city, district, sector, latitude, longitude, is_active, points_rate, cash_points_rate, card_points_rate')
-        .eq('store_id', searchValue)
+        .select('id, store_id, store_name, is_active, points_rate, cash_points_rate, card_points_rate')
+        .eq('store_id', isNumeric ? parsedInt : cleanCode)
         .maybeSingle();
-
-      console.log('[merchant-get] Primary search - result:', JSON.stringify(result), 'error:', JSON.stringify(err));
-
-      if (result) {
-        merchant = result;
-      } else if (err) {
-        queryError = err;
-      }
-
-      // Fallback: try as string if integer search failed
-      if (!merchant && !queryError && typeof searchValue === 'number') {
-        console.log('[merchant-get] Fallback: trying as string:', storeId);
-        const { data: strResult, error: strErr } = await supabase
-          .from('merchants')
-          .select('id, store_id, store_name, city, district, sector, latitude, longitude, is_active, points_rate, cash_points_rate, card_points_rate')
-          .eq('store_id', storeId)
-          .maybeSingle();
-
-        console.log('[merchant-get] String fallback - result:', JSON.stringify(strResult), 'error:', JSON.stringify(strErr));
-        
-        if (strResult) {
-          merchant = strResult;
-        } else {
-          queryError = strErr;
-        }
-      }
-    } else if (id) {
-      // Search by UUID id column
-      console.log('[merchant-get] Searching by id:', id);
-      const { data: result, error: err } = await supabase
-        .from('merchants')
-        .select('id, store_id, store_name, city, district, sector, latitude, longitude, is_active, points_rate, cash_points_rate, card_points_rate')
-        .eq('id', id)
-        .maybeSingle();
-
-      console.log('[merchant-get] id search - result:', JSON.stringify(result), 'error:', JSON.stringify(err));
-      merchant = result;
-      queryError = err;
+      if (data) merchant = data;
     }
 
-    if (queryError || !merchant) {
-      console.log('[merchant-get] NOT FOUND. queryError:', JSON.stringify(queryError));
-      return new Response(JSON.stringify({ 
-        error: 'Esnaf bulunamadi',
-        debug_info: {
-          searched_store_id: storeId || null,
-          searched_id: id || null,
-          db_error: queryError?.message || null,
-          db_error_details: queryError?.details || null,
-          db_error_hint: queryError?.hint || null,
-        }
+    // Strategy 2: If numeric didn't match, try as text (store_id might be stored as text)
+    if (!merchant && isNumeric) {
+      const { data } = await supabase
+        .from('merchants')
+        .select('id, store_id, store_name, is_active, points_rate, cash_points_rate, card_points_rate')
+        .eq('store_id', cleanCode) // as string
+        .maybeSingle();
+      if (data) merchant = data;
+    }
+
+    // Strategy 3: If UUID, also check the id column
+    if (!merchant && isUUID) {
+      const { data } = await supabase
+        .from('merchants')
+        .select('id, store_id, store_name, is_active, points_rate, cash_points_rate, card_points_rate')
+        .eq('id', cleanCode)
+        .maybeSingle();
+      if (data) merchant = data;
+    }
+
+    // Strategy 4: Cast-based search - if store_id is integer but user sent text or vice versa
+    if (!merchant && !isUUID) {
+      const { data } = await supabase
+        .from('merchants')
+        .select('id, store_id, store_name, is_active, points_rate, cash_points_rate, card_points_rate')
+        .filter('store_id::text', 'eq', cleanCode)
+        .maybeSingle();
+      if (data) merchant = data;
+    }
+
+    if (!merchant) {
+      return new Response(JSON.stringify({
+        success: false,
+        error: 'Magaza bulunamadi',
+        searched_code: cleanCode,
+        search_type: isUUID ? 'uuid' : isNumeric ? 'numeric' : 'text',
       }), {
-        status: 404,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-
-    if (!merchant.is_active) {
-      return new Response(JSON.stringify({ error: 'Bu dukkan aktif degil' }), {
-        status: 403,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    console.log('[merchant-get] SUCCESS - Found merchant:', merchant.store_name, 'store_id:', merchant.store_id);
 
     return new Response(JSON.stringify({
       success: true,
@@ -164,25 +95,19 @@ Deno.serve(async (req: Request) => {
         id: merchant.id,
         store_id: merchant.store_id,
         store_name: merchant.store_name,
-        city: merchant.city,
-        district: merchant.district,
-        sector: merchant.sector,
-        latitude: merchant.latitude,
-        longitude: merchant.longitude,
-        points_rate: merchant.points_rate || 7,
-        cash_points_rate: merchant.cash_points_rate || merchant.points_rate || 7,
-        card_points_rate: merchant.card_points_rate || merchant.points_rate || 7,
-      }
+        is_active: merchant.is_active,
+        points_rate: merchant.points_rate,
+        cash_points_rate: merchant.cash_points_rate,
+        card_points_rate: merchant.card_points_rate,
+      },
     }), {
-      status: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
 
-  } catch (err) {
-    console.error('[merchant-get] EXCEPTION:', err);
-    return new Response(JSON.stringify({ error: 'Sunucu hatasi', details: String(err) }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+  } catch (error) {
+    console.error('merchant-get error:', error);
+    return new Response(JSON.stringify({ error: 'Sunucu hatasi' }), {
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });

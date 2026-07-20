@@ -17,81 +17,68 @@ async function getAuthUser(req: Request, supabase: any) {
 }
 
 /**
- * Esnek magaza arama - merchant-get ile ayni mantik
- * store_id sutunu integer veya text olabilir, her ikisini de dener.
- * Ayrica id (UUID) ile de arar.
+ * Optimize magaza arama - TEK SORGU, indeksli, hafif.
+ * Tum tabloyu ASLA taramaz. Sadece .or() ile nokta atisi yapar.
+ * store_id integer veya text olabilir - her ikisini de tek sorguda dener.
+ * UUID formatindaysa id sutununda da arar.
  */
-async function findMerchantFlexible(supabase: any, inputCode: string) {
-  const cleanCode = String(inputCode).trim().replace(/\s+/g, '');
+async function findMerchantOptimized(supabase: any, inputCode: string) {
+  const cleanCode = String(inputCode).trim();
   if (!cleanCode) return null;
 
-  // 1. store_id integer olarak dene (en yaygin durum)
+  // UUID formatini kontrol et
+  const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanCode);
   const parsedInt = parseInt(cleanCode);
-  if (!isNaN(parsedInt)) {
-    const { data } = await supabase
-      .from('merchants')
-      .select('id, store_id, store_name, is_active')
-      .eq('store_id', parsedInt)
-      .maybeSingle();
-    if (data) return data;
+  const isNumeric = !isNaN(parsedInt) && String(parsedInt) === cleanCode;
+
+  // TEK SORGU: .or() filtresi ile indeksli arama
+  // store_id.eq (integer veya text) + id.eq (UUID) ayni anda
+  let orFilter = `store_id.eq.${cleanCode}`;
+
+  if (isNumeric) {
+    // Sayi ise: integer olarak da dene (Supabase otomatik cast yapar)
+    orFilter = `store_id.eq.${parsedInt}`;
   }
 
-  // 2. store_id string olarak dene (fallback - merchant-get ile ayni)
-  {
-    const { data } = await supabase
+  if (isUUID) {
+    // UUID ise: id sutununda da ara
+    orFilter = `store_id.eq.${cleanCode},id.eq.${cleanCode}`;
+  } else if (isNumeric) {
+    // Sayi ise: store_id integer + store_id text (cast)
+    orFilter = `store_id.eq.${parsedInt}`;
+  } else {
+    // Text ise: store_id text olarak
+    orFilter = `store_id.eq.${cleanCode}`;
+  }
+
+  const { data, error } = await supabase
+    .from('merchants')
+    .select('id, store_id, store_name, is_active')
+    .or(orFilter)
+    .limit(1)
+    .maybeSingle();
+
+  if (data) return data;
+
+  // Eger ilk sorgu bulamadiysa ve sayi ise, text olarak da dene (tek ek sorgu)
+  if (!data && isNumeric) {
+    const { data: textResult } = await supabase
       .from('merchants')
       .select('id, store_id, store_name, is_active')
       .eq('store_id', cleanCode)
       .maybeSingle();
-    if (data) return data;
+    if (textResult) return textResult;
   }
 
-  // 3. id (UUID) tam eslesmesi
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  if (uuidRegex.test(cleanCode)) {
-    const { data } = await supabase
+  // Eger ilk sorgu bulamadiysa ve text ise, cast::text ile dene
+  if (!data && !isNumeric && !isUUID) {
+    // Son deneme: belki store_id integer ama kullanici baska formatta girdi
+    const { data: castResult } = await supabase
       .from('merchants')
       .select('id, store_id, store_name, is_active')
-      .eq('id', cleanCode)
+      .filter('store_id::text', 'eq', cleanCode)
       .maybeSingle();
-    if (data) return data;
-  }
-
-  // 4. id kismi eslesmesi (ilk N karakter, en az 6)
-  if (cleanCode.length >= 6 && !isNaN(parsedInt) === false) {
-    const { data: partialMatches } = await supabase
-      .from('merchants')
-      .select('id, store_id, store_name, is_active')
-      .like('id', `${cleanCode}%`)
-      .limit(2);
-    if (partialMatches && partialMatches.length === 1) {
-      return partialMatches[0];
-    }
-  }
-
-  // 5. Son care: tum esnaflari cek ve esnek karsilastirma yap
-  const { data: allMerchants } = await supabase
-    .from('merchants')
-    .select('id, store_id, store_name, is_active')
-    .eq('is_active', true)
-    .limit(200);
-
-  if (allMerchants && allMerchants.length > 0) {
-    const lowerCode = cleanCode.toLowerCase();
-    
-    // store_id veya id string eslesmesi
-    const found = allMerchants.find((m: any) => {
-      const sid = String(m.store_id ?? '').trim().toLowerCase();
-      const mid = String(m.id ?? '').trim().toLowerCase();
-      return sid === lowerCode || mid === lowerCode || mid.startsWith(lowerCode);
-    });
-    if (found) return found;
-
-    // store_name tam eslesmesi (case-insensitive)
-    const nameMatch = allMerchants.find((m: any) => {
-      return String(m.store_name ?? '').trim().toLowerCase() === lowerCode;
-    });
-    if (nameMatch) return nameMatch;
+    if (castResult) return castResult;
   }
 
   return null;
@@ -196,23 +183,26 @@ Deno.serve(async (req: Request) => {
           }
         }
 
-        // ESNEK MAGAZA ARAMA
+        // OPTIMIZE MAGAZA ARAMA - tek sorgu, indeksli
         let merchant: any = null;
+
         if (directMerchantId) {
-          // Dogrudan merchant_id ile ara
+          // Frontend merchant-get ile zaten bulmussa, dogrudan id ile tek sorgu
           const { data } = await supabase
             .from('merchants')
             .select('id, store_id, store_name, is_active')
             .eq('id', directMerchantId)
             .maybeSingle();
           merchant = data;
-        } else if (store_id) {
-          // Esnek arama: merchant-get ile ayni mantik + ekstra fallback'ler
-          merchant = await findMerchantFlexible(supabase, store_id);
+        }
+
+        // merchant_id ile bulunamadiysa veya gonderilmediyse, store_id ile optimize arama
+        if (!merchant && store_id) {
+          merchant = await findMerchantOptimized(supabase, store_id);
         }
 
         if (!merchant) {
-          return new Response(JSON.stringify({ 
+          return new Response(JSON.stringify({
             error: 'Bu magaza kodu bulunamadi. Lutfen esnafin panelinde gorunen kodu dogru girdiginizden emin olun.',
             searched_code: String(store_id || directMerchantId).trim(),
           }), {

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Handshake,
@@ -14,6 +14,8 @@ import {
   Clock,
   MapPin,
   LayoutDashboard,
+  Camera,
+  Keyboard,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -42,6 +44,10 @@ export function CustomerPanel() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [visitedStores, setVisitedStores] = useState<VisitedStore[]>([]);
   const [pendingRequests, setPendingRequests] = useState<any[]>([]);
+  const [showQRScanner, setShowQRScanner] = useState(false);
+  const [scannerReady, setScannerReady] = useState(false);
+  const scannerRef = useRef<any>(null);
+  const scannerContainerRef = useRef<HTMLDivElement>(null);
 
   const customer = profile as any;
 
@@ -59,6 +65,13 @@ export function CustomerPanel() {
       calculateVisitedStores();
     }
   }, [transactions]);
+
+  // QR Scanner cleanup on unmount
+  useEffect(() => {
+    return () => {
+      stopScanner();
+    };
+  }, []);
 
   const fetchTransactions = async () => {
     try {
@@ -140,8 +153,109 @@ export function CustomerPanel() {
     setVisitedStores(sorted);
   };
 
-  const handleSendPointRequest = async () => {
-    if (!storeCode.trim()) {
+  const startScanner = useCallback(async () => {
+    setShowQRScanner(true);
+    setScannerReady(false);
+
+    // Wait for DOM to render the container
+    setTimeout(async () => {
+      try {
+        const { Html5Qrcode } = await import('html5-qrcode');
+        const scannerId = 'qr-reader';
+
+        // Make sure container exists
+        const container = document.getElementById(scannerId);
+        if (!container) {
+          setMessage({ type: 'error', text: 'QR tarayıcı başlatılamadı. Lütfen tekrar deneyin.' });
+          setShowQRScanner(false);
+          return;
+        }
+
+        const scanner = new Html5Qrcode(scannerId);
+        scannerRef.current = scanner;
+
+        await scanner.start(
+          { facingMode: 'environment' },
+          {
+            fps: 10,
+            qrbox: { width: 250, height: 250 },
+            aspectRatio: 1.0,
+          },
+          (decodedText: string) => {
+            // QR code successfully scanned
+            handleQRResult(decodedText);
+            stopScanner();
+          },
+          () => {
+            // QR scan error (no code found yet) - ignore
+          }
+        );
+
+        setScannerReady(true);
+      } catch (err: any) {
+        console.error('Scanner error:', err);
+        let errorMsg = 'Kamera açılamadı.';
+        if (err?.message?.includes('NotAllowedError') || err?.name === 'NotAllowedError') {
+          errorMsg = 'Kamera izni reddedildi. Lütfen tarayıcı ayarlarından kamera iznini verin.';
+        } else if (err?.message?.includes('NotFoundError') || err?.name === 'NotFoundError') {
+          errorMsg = 'Kamera bulunamadı. Lütfen cihazınızda kamera olduğundan emin olun.';
+        }
+        setMessage({ type: 'error', text: errorMsg });
+        setShowQRScanner(false);
+      }
+    }, 300);
+  }, []);
+
+  const stopScanner = useCallback(() => {
+    if (scannerRef.current) {
+      try {
+        scannerRef.current.stop().then(() => {
+          scannerRef.current.clear();
+          scannerRef.current = null;
+        }).catch(() => {
+          scannerRef.current = null;
+        });
+      } catch {
+        scannerRef.current = null;
+      }
+    }
+    setShowQRScanner(false);
+    setScannerReady(false);
+  }, []);
+
+  const handleQRResult = (decodedText: string) => {
+    let extractedCode = '';
+
+    try {
+      // Try parsing as JSON (merchant QR format: { store_id: "123456", type: "merchant_qr" })
+      const parsed = JSON.parse(decodedText);
+      if (parsed.store_id) {
+        extractedCode = String(parsed.store_id);
+      } else if (parsed.id) {
+        extractedCode = String(parsed.id);
+      } else if (parsed.merchant_id) {
+        extractedCode = String(parsed.merchant_id);
+      }
+    } catch {
+      // Not JSON - treat as plain text store code
+      extractedCode = decodedText.trim();
+    }
+
+    if (extractedCode) {
+      setStoreCode(extractedCode);
+      setMessage({ type: 'success', text: `QR kod okundu! Mağaza kodu: ${extractedCode}` });
+
+      // Auto-submit after a short delay
+      setTimeout(() => {
+        handleSendPointRequestWithCode(extractedCode);
+      }, 500);
+    } else {
+      setMessage({ type: 'error', text: 'QR koddan mağaza bilgisi okunamadı.' });
+    }
+  };
+
+  const handleSendPointRequestWithCode = async (code: string) => {
+    if (!code.trim()) {
       setMessage({ type: 'error', text: 'Lütfen mağaza kodunu girin' });
       return;
     }
@@ -162,14 +276,14 @@ export function CustomerPanel() {
         'Authorization': `Bearer ${session.access_token}`,
         'Content-Type': 'application/json',
       };
-      const code = storeCode.trim();
+      const cleanCode = code.trim();
 
-      // Adım 1: Önce merchant-get ile esnafı bul (bu fonksiyon daha önce sorunsuz çalışıyordu)
+      // Step 1: Find merchant via merchant-get
       let merchantId: string | null = null;
       let merchantName: string | null = null;
 
       try {
-        const merchantGetUrl = `${baseUrl}/functions/v1/merchant-get?store_id=${encodeURIComponent(code)}`;
+        const merchantGetUrl = `${baseUrl}/functions/v1/merchant-get?store_id=${encodeURIComponent(cleanCode)}`;
         const merchantRes = await fetch(merchantGetUrl, { method: 'GET', headers });
         const merchantData = await merchantRes.json();
 
@@ -181,19 +295,17 @@ export function CustomerPanel() {
         console.warn('merchant-get fallback failed:', e);
       }
 
-      // Adım 2: Talep gönder - merchant_id bulunduysa onu kullan, bulunamadıysa store_id ile dene
+      // Step 2: Send request
       const requestUrl = `${baseUrl}/functions/v1/requests?action=create`;
       const requestBody: any = {
         payment_type: 'cash',
       };
 
       if (merchantId) {
-        // merchant-get ile bulundu - doğrudan merchant_id gönder (en güvenilir yol)
         requestBody.merchant_id = merchantId;
-        requestBody.store_id = code; // fallback için de gönder
+        requestBody.store_id = cleanCode;
       } else {
-        // merchant-get bulamadı - requests fonksiyonunun esnek aramasına bırak
-        requestBody.store_id = code;
+        requestBody.store_id = cleanCode;
       }
 
       const response = await fetch(requestUrl, {
@@ -226,6 +338,10 @@ export function CustomerPanel() {
     } finally {
       setProcessing(false);
     }
+  };
+
+  const handleSendPointRequest = async () => {
+    await handleSendPointRequestWithCode(storeCode);
   };
 
   const handleSignOut = async () => {
@@ -350,7 +466,7 @@ export function CustomerPanel() {
               </div>
             </div>
 
-            {/* Puan Talebi Gönder - SADECE MAĞAZA KODU */}
+            {/* Puan Talebi Gönder - MANUEL KOD + QR TARAMA */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
               <div className="flex items-center gap-3 mb-5">
                 <div className="w-10 h-10 rounded-xl bg-secondary-100 flex items-center justify-center">
@@ -358,11 +474,57 @@ export function CustomerPanel() {
                 </div>
                 <div>
                   <h2 className="font-heading font-semibold text-gray-900">Puan Talebi Gönder</h2>
-
+                  <p className="text-xs text-gray-500">Kod girin veya QR okutun</p>
                 </div>
               </div>
 
+              {/* QR Scanner Modal */}
+              {showQRScanner && (
+                <div className="mb-5">
+                  <div className="relative bg-black rounded-2xl overflow-hidden">
+                    <div id="qr-reader" ref={scannerContainerRef} className="w-full" style={{ minHeight: '300px' }}></div>
+                    {!scannerReady && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-gray-900/80">
+                        <div className="text-center text-white">
+                          <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" />
+                          <p className="text-sm">Kamera açılıyor...</p>
+                        </div>
+                      </div>
+                    )}
+                    <button
+                      onClick={stopScanner}
+                      className="absolute top-3 right-3 bg-red-500 text-white p-2 rounded-full shadow-lg hover:bg-red-600 transition-colors z-10"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-500 text-center mt-2">
+                    Esnafın kasasındaki QR kodu kameraya gösterin
+                  </p>
+                </div>
+              )}
+
               <div className="space-y-4">
+                {/* Two method buttons */}
+                {!showQRScanner && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      onClick={startScanner}
+                      disabled={processing}
+                      className="flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-dashed border-primary-300 bg-primary-50 hover:bg-primary-100 hover:border-primary-400 transition-all"
+                    >
+                      <Camera className="w-8 h-8 text-primary-600" />
+                      <span className="text-sm font-semibold text-primary-700">QR Kod Okut</span>
+                      <span className="text-xs text-primary-500">Kamerayı aç</span>
+                    </button>
+                    <div className="flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-gray-200 bg-gray-50">
+                      <Keyboard className="w-8 h-8 text-gray-500" />
+                      <span className="text-sm font-semibold text-gray-700">Manuel Giriş</span>
+                      <span className="text-xs text-gray-500">Kodu yaz</span>
+                    </div>
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Mağaza Kodu</label>
                   <input
@@ -371,7 +533,7 @@ export function CustomerPanel() {
                     onChange={(e) => setStoreCode(e.target.value)}
                     className="w-full px-4 py-4 rounded-xl border border-gray-300 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-2xl text-center tracking-[0.3em] font-mono font-bold"
                     placeholder="• • •"
-                    maxLength={6}
+                    maxLength={36}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && storeCode.trim()) {
                         handleSendPointRequest();
@@ -379,7 +541,7 @@ export function CustomerPanel() {
                     }}
                   />
                   <p className="text-xs text-gray-400 mt-2 text-center">
-                    Alışveriş yaptığınız esnaftan mağaza kodunu isteyin
+                    Alışveriş yaptığınız esnaftan mağaza kodunu isteyin veya QR kodunu okutun
                   </p>
                 </div>
 
