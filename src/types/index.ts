@@ -79,6 +79,7 @@ export interface QRData {
   merchant_id: string;
   store_id: number;
   store_name: string;
+  points_rate?: number;
 }
 
 export interface TransactionRequest {

@@ -143,17 +143,19 @@ export function LoginPage() {
                 'Giriş Yap'
               )}
             </button>
-          </form>
 
-          <div className="mt-4 text-center">
-            <button
-              type="button"
-              onClick={() => setShowForgotModal(true)}
-              className="inline-flex items-center justify-center text-blue-600 font-semibold hover:text-blue-800 hover:underline transition-colors text-base py-2"
-            >
-              Şifremi Unuttum
-            </button>
-          </div>
+            {/* Şifremi Unuttum - Giriş butonunun hemen altında, her zaman görünür */}
+            <div className="w-full text-center pt-3" style={{ display: 'block', visibility: 'visible' }}>
+              <button
+                type="button"
+                onClick={() => setShowForgotModal(true)}
+                className="text-blue-600 font-semibold text-base hover:text-blue-800 hover:underline transition-colors cursor-pointer"
+                style={{ color: '#2563eb', display: 'inline-block', visibility: 'visible' }}
+              >
+                Şifremi Unuttum
+              </button>
+            </div>
+          </form>
 
           <div className="mt-6 text-center">
             <p className="text-gray-500">

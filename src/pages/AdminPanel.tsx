@@ -138,59 +138,41 @@ export function AdminPanel() {
   const fetchData = async () => {
     setLoading(true);
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-data`;
+      const headers = {
+        'Authorization': `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      };
+
       if (activeTab === 'overview') {
-        const { count: customerCount } = await supabase
-          .from('customers')
-          .select('*', { count: 'exact', head: true });
-
-        const { count: merchantCount } = await supabase
-          .from('merchants')
-          .select('*', { count: 'exact', head: true });
-
-        const { count: transactionCount } = await supabase
-          .from('transactions')
-          .select('*', { count: 'exact', head: true })
-          .eq('status', 'completed');
-
-        const { data: merchantStats } = await supabase
-          .from('merchants')
-          .select('total_revenue, total_points_distributed');
-
-        const totalRevenue = merchantStats?.reduce((sum, m) => sum + (m.total_revenue || 0), 0) || 0;
-        const totalPoints = merchantStats?.reduce((sum, m) => sum + (m.total_points_distributed || 0), 0) || 0;
-
-        setStats({
-          totalCustomers: customerCount || 0,
-          totalMerchants: merchantCount || 0,
-          totalTransactions: transactionCount || 0,
-          totalRevenue,
-          totalPoints,
-        });
+        const response = await fetch(`${apiUrl}?action=overview`, { headers });
+        const data = await response.json();
+        if (response.ok && data.success) {
+          setStats(data.stats);
+          setMerchants(data.merchants || []);
+          setCustomers(data.customers || []);
+        }
       } else if (activeTab === 'customers') {
-        const { data } = await supabase
-          .from('customers')
-          .select('*')
-          .order('created_at', { ascending: false })
-          .limit(100);
-        setCustomers(data || []);
+        const response = await fetch(`${apiUrl}?action=customers`, { headers });
+        const data = await response.json();
+        if (response.ok && data.success) {
+          setCustomers(data.customers || []);
+        }
       } else if (activeTab === 'merchants') {
-        const { data } = await supabase
-          .from('merchants')
-          .select('*')
-          .order('created_at', { ascending: false })
-          .limit(100);
-        setMerchants(data || []);
+        const response = await fetch(`${apiUrl}?action=merchants`, { headers });
+        const data = await response.json();
+        if (response.ok && data.success) {
+          setMerchants(data.merchants || []);
+        }
       } else if (activeTab === 'transactions') {
-        const { data } = await supabase
-          .from('transactions')
-          .select(`
-            *,
-            customers (full_name, phone),
-            merchants (store_name, store_id)
-          `)
-          .order('created_at', { ascending: false })
-          .limit(200);
-        setTransactions(data || []);
+        const response = await fetch(`${apiUrl}?action=transactions`, { headers });
+        const data = await response.json();
+        if (response.ok && data.success) {
+          setTransactions(data.transactions || []);
+        }
       }
     } catch (err) {
       console.error('Error fetching data:', err);
