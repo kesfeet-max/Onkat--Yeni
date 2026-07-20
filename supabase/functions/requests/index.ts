@@ -124,8 +124,17 @@ Deno.serve(async (req: Request) => {
           const { data } = await supabase.from('merchants').select('id, store_name, is_active').eq('id', directMerchantId).single();
           merchant = data;
         } else if (store_id) {
-          const { data } = await supabase.from('merchants').select('id, store_name, is_active').eq('store_id', parseInt(store_id)).single();
-          merchant = data;
+          // Try as integer first (most common), then as string
+          const parsedStoreId = parseInt(String(store_id));
+          if (!isNaN(parsedStoreId)) {
+            const { data } = await supabase.from('merchants').select('id, store_name, is_active').eq('store_id', parsedStoreId).maybeSingle();
+            merchant = data;
+          }
+          // Fallback: try as string
+          if (!merchant) {
+            const { data } = await supabase.from('merchants').select('id, store_name, is_active').eq('store_id', String(store_id)).maybeSingle();
+            merchant = data;
+          }
         }
 
         if (!merchant) {
@@ -214,7 +223,7 @@ Deno.serve(async (req: Request) => {
 
       // Merchant approves/rejects a request
       if (action === 'respond') {
-        const { request_id, response, points } = body;
+        const { request_id, response, points, amount: responseAmount, payment_type: responsePaymentType } = body;
 
         if (!request_id || !response || !['approved', 'rejected'].includes(response)) {
           return new Response(JSON.stringify({ error: 'Gecersiz istek' }), {
