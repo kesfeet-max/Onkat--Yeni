@@ -17,21 +17,15 @@ async function getAuthUser(req: Request, supabase: any) {
 }
 
 /**
- * Esnek magaza arama fonksiyonu
- * Müşterinin girdiği kodu şu sırayla arar:
- * 1. store_id (integer olarak)
- * 2. store_id (string olarak, trim + case-insensitive)
- * 3. id (UUID olarak - tam eşleşme)
- * 4. id (kısmi eşleşme - ilk N karakter)
- * Bulamazsa null döner.
+ * Esnek magaza arama - merchant-get ile ayni mantik
+ * store_id sutunu integer veya text olabilir, her ikisini de dener.
+ * Ayrica id (UUID) ile de arar.
  */
 async function findMerchantFlexible(supabase: any, inputCode: string) {
-  // Girdiyi temizle: boşlukları kaldır, trim et
   const cleanCode = String(inputCode).trim().replace(/\s+/g, '');
-  
   if (!cleanCode) return null;
 
-  // 1. store_id integer olarak dene
+  // 1. store_id integer olarak dene (en yaygin durum)
   const parsedInt = parseInt(cleanCode);
   if (!isNaN(parsedInt)) {
     const { data } = await supabase
@@ -42,16 +36,17 @@ async function findMerchantFlexible(supabase: any, inputCode: string) {
     if (data) return data;
   }
 
-  // 2. store_id string olarak dene (case-insensitive)
-  const { data: strMatch } = await supabase
-    .from('merchants')
-    .select('id, store_id, store_name, is_active')
-    .ilike('store_id', cleanCode)
-    .maybeSingle();
-  if (strMatch) return strMatch;
+  // 2. store_id string olarak dene (fallback - merchant-get ile ayni)
+  {
+    const { data } = await supabase
+      .from('merchants')
+      .select('id, store_id, store_name, is_active')
+      .eq('store_id', cleanCode)
+      .maybeSingle();
+    if (data) return data;
+  }
 
-  // 3. UUID tam eşleşme (id sütunu)
-  // UUID formatı: 8-4-4-4-12 hex karakter
+  // 3. id (UUID) tam eslesmesi
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   if (uuidRegex.test(cleanCode)) {
     const { data } = await supabase
@@ -62,43 +57,41 @@ async function findMerchantFlexible(supabase: any, inputCode: string) {
     if (data) return data;
   }
 
-  // 4. id sütununda kısmi eşleşme (ilk N karakter) - kullanıcı UUID'nin başını girmiş olabilir
-  if (cleanCode.length >= 4) {
+  // 4. id kismi eslesmesi (ilk N karakter, en az 6)
+  if (cleanCode.length >= 6 && !isNaN(parsedInt) === false) {
     const { data: partialMatches } = await supabase
       .from('merchants')
       .select('id, store_id, store_name, is_active')
-      .ilike('id', `${cleanCode}%`)
+      .like('id', `${cleanCode}%`)
       .limit(2);
-    // Sadece tek bir sonuç varsa eşleştir (belirsizlik olmasın)
     if (partialMatches && partialMatches.length === 1) {
       return partialMatches[0];
     }
   }
 
-  // 5. store_name ile kısmi eşleşme (son çare - tam eşleşme)
-  const { data: nameMatch } = await supabase
-    .from('merchants')
-    .select('id, store_id, store_name, is_active')
-    .ilike('store_name', cleanCode)
-    .maybeSingle();
-  if (nameMatch) return nameMatch;
-
-  // 6. Tüm esnafları çek ve store_id'si null/boş olanlar arasında id ile eşleştir
-  // Bu, store_id atanmamış esnaflar için fallback
+  // 5. Son care: tum esnaflari cek ve esnek karsilastirma yap
   const { data: allMerchants } = await supabase
     .from('merchants')
     .select('id, store_id, store_name, is_active')
-    .limit(100);
-  
-  if (allMerchants) {
-    // store_id veya id'nin string hali cleanCode ile eşleşiyor mu?
+    .eq('is_active', true)
+    .limit(200);
+
+  if (allMerchants && allMerchants.length > 0) {
     const lowerCode = cleanCode.toLowerCase();
+    
+    // store_id veya id string eslesmesi
     const found = allMerchants.find((m: any) => {
-      const sid = String(m.store_id || '').trim().toLowerCase();
-      const mid = String(m.id || '').trim().toLowerCase();
+      const sid = String(m.store_id ?? '').trim().toLowerCase();
+      const mid = String(m.id ?? '').trim().toLowerCase();
       return sid === lowerCode || mid === lowerCode || mid.startsWith(lowerCode);
     });
     if (found) return found;
+
+    // store_name tam eslesmesi (case-insensitive)
+    const nameMatch = allMerchants.find((m: any) => {
+      return String(m.store_name ?? '').trim().toLowerCase() === lowerCode;
+    });
+    if (nameMatch) return nameMatch;
   }
 
   return null;
@@ -203,20 +196,25 @@ Deno.serve(async (req: Request) => {
           }
         }
 
-        // ESNEK MAGAZA ARAMA - Birden fazla yöntemle esnafı bul
+        // ESNEK MAGAZA ARAMA
         let merchant: any = null;
         if (directMerchantId) {
-          const { data } = await supabase.from('merchants').select('id, store_id, store_name, is_active').eq('id', directMerchantId).single();
+          // Dogrudan merchant_id ile ara
+          const { data } = await supabase
+            .from('merchants')
+            .select('id, store_id, store_name, is_active')
+            .eq('id', directMerchantId)
+            .maybeSingle();
           merchant = data;
         } else if (store_id) {
-          // Esnek arama fonksiyonunu kullan
+          // Esnek arama: merchant-get ile ayni mantik + ekstra fallback'ler
           merchant = await findMerchantFlexible(supabase, store_id);
         }
 
         if (!merchant) {
           return new Response(JSON.stringify({ 
             error: 'Bu magaza kodu bulunamadi. Lutfen esnafin panelinde gorunen kodu dogru girdiginizden emin olun.',
-            debug_hint: `Aranan kod: "${String(store_id).trim()}"` 
+            searched_code: String(store_id || directMerchantId).trim(),
           }), {
             status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
@@ -269,7 +267,7 @@ Deno.serve(async (req: Request) => {
           }
         }
 
-        // Create request - amount is 0, merchant will set it during approval
+        // Create request
         const { data: newRequest, error: insertError } = await supabase.from('requests').insert({
           customer_id: customer.id,
           merchant_id: merchant.id,

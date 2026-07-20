@@ -157,30 +157,60 @@ export function CustomerPanel() {
         return;
       }
 
-      // Send point request directly to requests edge function with action=create
-      const requestUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/requests?action=create`;
+      const baseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const headers = {
+        'Authorization': `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      };
+      const code = storeCode.trim();
+
+      // Adım 1: Önce merchant-get ile esnafı bul (bu fonksiyon daha önce sorunsuz çalışıyordu)
+      let merchantId: string | null = null;
+      let merchantName: string | null = null;
+
+      try {
+        const merchantGetUrl = `${baseUrl}/functions/v1/merchant-get?store_id=${encodeURIComponent(code)}`;
+        const merchantRes = await fetch(merchantGetUrl, { method: 'GET', headers });
+        const merchantData = await merchantRes.json();
+
+        if (merchantRes.ok && merchantData.success && merchantData.merchant) {
+          merchantId = merchantData.merchant.id;
+          merchantName = merchantData.merchant.store_name;
+        }
+      } catch (e) {
+        console.warn('merchant-get fallback failed:', e);
+      }
+
+      // Adım 2: Talep gönder - merchant_id bulunduysa onu kullan, bulunamadıysa store_id ile dene
+      const requestUrl = `${baseUrl}/functions/v1/requests?action=create`;
+      const requestBody: any = {
+        payment_type: 'cash',
+      };
+
+      if (merchantId) {
+        // merchant-get ile bulundu - doğrudan merchant_id gönder (en güvenilir yol)
+        requestBody.merchant_id = merchantId;
+        requestBody.store_id = code; // fallback için de gönder
+      } else {
+        // merchant-get bulamadı - requests fonksiyonunun esnek aramasına bırak
+        requestBody.store_id = code;
+      }
+
       const response = await fetch(requestUrl, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          store_id: storeCode.trim(),
-          amount: 0, // Müşteri tutar girmez, esnaf onaylarken girer
-          payment_type: 'cash',
-        }),
+        headers,
+        body: JSON.stringify(requestBody),
       });
 
       const data = await response.json();
 
       if (response.ok && data.success) {
-        setMessage({ type: 'success', text: `Puan talebi "${data.merchant_name}" mağazasına gönderildi! Esnaf onayını bekleyin.` });
+        const name = data.merchant_name || merchantName || 'Mağaza';
+        setMessage({ type: 'success', text: `Puan talebi "${name}" mağazasına gönderildi! Esnaf onayını bekleyin.` });
         setStoreCode('');
         fetchPendingRequests();
         refreshProfile();
       } else {
-        // Daha anlaşılır hata mesajları
         let errorText = data.error || 'Talep gönderilemedi';
         if (errorText.includes('bulunamadi') || errorText.includes('Gecersiz magaza')) {
           errorText = 'Bu mağaza kodu bulunamadı. Lütfen esnaftan doğru kodu alın.';
