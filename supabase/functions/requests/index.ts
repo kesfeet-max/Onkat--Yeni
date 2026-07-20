@@ -16,6 +16,94 @@ async function getAuthUser(req: Request, supabase: any) {
   return user;
 }
 
+/**
+ * Esnek magaza arama fonksiyonu
+ * Müşterinin girdiği kodu şu sırayla arar:
+ * 1. store_id (integer olarak)
+ * 2. store_id (string olarak, trim + case-insensitive)
+ * 3. id (UUID olarak - tam eşleşme)
+ * 4. id (kısmi eşleşme - ilk N karakter)
+ * Bulamazsa null döner.
+ */
+async function findMerchantFlexible(supabase: any, inputCode: string) {
+  // Girdiyi temizle: boşlukları kaldır, trim et
+  const cleanCode = String(inputCode).trim().replace(/\s+/g, '');
+  
+  if (!cleanCode) return null;
+
+  // 1. store_id integer olarak dene
+  const parsedInt = parseInt(cleanCode);
+  if (!isNaN(parsedInt)) {
+    const { data } = await supabase
+      .from('merchants')
+      .select('id, store_id, store_name, is_active')
+      .eq('store_id', parsedInt)
+      .maybeSingle();
+    if (data) return data;
+  }
+
+  // 2. store_id string olarak dene (case-insensitive)
+  const { data: strMatch } = await supabase
+    .from('merchants')
+    .select('id, store_id, store_name, is_active')
+    .ilike('store_id', cleanCode)
+    .maybeSingle();
+  if (strMatch) return strMatch;
+
+  // 3. UUID tam eşleşme (id sütunu)
+  // UUID formatı: 8-4-4-4-12 hex karakter
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (uuidRegex.test(cleanCode)) {
+    const { data } = await supabase
+      .from('merchants')
+      .select('id, store_id, store_name, is_active')
+      .eq('id', cleanCode)
+      .maybeSingle();
+    if (data) return data;
+  }
+
+  // 4. id sütununda kısmi eşleşme (ilk N karakter) - kullanıcı UUID'nin başını girmiş olabilir
+  if (cleanCode.length >= 4) {
+    const { data: partialMatches } = await supabase
+      .from('merchants')
+      .select('id, store_id, store_name, is_active')
+      .ilike('id', `${cleanCode}%`)
+      .limit(2);
+    // Sadece tek bir sonuç varsa eşleştir (belirsizlik olmasın)
+    if (partialMatches && partialMatches.length === 1) {
+      return partialMatches[0];
+    }
+  }
+
+  // 5. store_name ile kısmi eşleşme (son çare - tam eşleşme)
+  const { data: nameMatch } = await supabase
+    .from('merchants')
+    .select('id, store_id, store_name, is_active')
+    .ilike('store_name', cleanCode)
+    .maybeSingle();
+  if (nameMatch) return nameMatch;
+
+  // 6. Tüm esnafları çek ve store_id'si null/boş olanlar arasında id ile eşleştir
+  // Bu, store_id atanmamış esnaflar için fallback
+  const { data: allMerchants } = await supabase
+    .from('merchants')
+    .select('id, store_id, store_name, is_active')
+    .limit(100);
+  
+  if (allMerchants) {
+    // store_id veya id'nin string hali cleanCode ile eşleşiyor mu?
+    const lowerCode = cleanCode.toLowerCase();
+    const found = allMerchants.find((m: any) => {
+      const sid = String(m.store_id || '').trim().toLowerCase();
+      const mid = String(m.id || '').trim().toLowerCase();
+      return sid === lowerCode || mid === lowerCode || mid.startsWith(lowerCode);
+    });
+    if (found) return found;
+  }
+
+  return null;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
@@ -41,7 +129,6 @@ Deno.serve(async (req: Request) => {
 
     // GET: List requests
     if (req.method === 'GET') {
-      // Check if user is customer or merchant
       const { data: customer } = await supabase.from('customers').select('id').eq('user_id', user.id).single();
       const { data: merchant } = await supabase.from('merchants').select('id, store_id').eq('user_id', user.id).single();
 
@@ -78,7 +165,6 @@ Deno.serve(async (req: Request) => {
     if (req.method === 'POST') {
       const body = await req.json();
 
-      // Auto-detect action from body if not in URL
       if (!action) {
         if (body.store_id || body.merchant_id) {
           action = 'create';
@@ -89,10 +175,10 @@ Deno.serve(async (req: Request) => {
 
       // Customer creates a request
       if (action === 'create') {
-        const { store_id, amount, payment_type, latitude, longitude, merchant_id: directMerchantId } = body;
+        const { store_id, payment_type, latitude, longitude, merchant_id: directMerchantId } = body;
 
         if (!store_id && !directMerchantId) {
-          return new Response(JSON.stringify({ error: 'Magaza kodu veya merchant_id gerekli' }), {
+          return new Response(JSON.stringify({ error: 'Magaza kodu gerekli' }), {
             status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
@@ -113,32 +199,25 @@ Deno.serve(async (req: Request) => {
               status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
             });
           } else {
-            // Suspension expired, unsuspend
             await supabase.from('customers').update({ is_suspended: false, suspended_until: null }).eq('id', customer.id);
           }
         }
 
-        // Find merchant - either by direct merchant_id or by store_id
+        // ESNEK MAGAZA ARAMA - Birden fazla yöntemle esnafı bul
         let merchant: any = null;
         if (directMerchantId) {
-          const { data } = await supabase.from('merchants').select('id, store_name, is_active').eq('id', directMerchantId).single();
+          const { data } = await supabase.from('merchants').select('id, store_id, store_name, is_active').eq('id', directMerchantId).single();
           merchant = data;
         } else if (store_id) {
-          // Try as integer first (most common), then as string
-          const parsedStoreId = parseInt(String(store_id));
-          if (!isNaN(parsedStoreId)) {
-            const { data } = await supabase.from('merchants').select('id, store_name, is_active').eq('store_id', parsedStoreId).maybeSingle();
-            merchant = data;
-          }
-          // Fallback: try as string
-          if (!merchant) {
-            const { data } = await supabase.from('merchants').select('id, store_name, is_active').eq('store_id', String(store_id)).maybeSingle();
-            merchant = data;
-          }
+          // Esnek arama fonksiyonunu kullan
+          merchant = await findMerchantFlexible(supabase, store_id);
         }
 
         if (!merchant) {
-          return new Response(JSON.stringify({ error: 'Gecersiz magaza kodu' }), {
+          return new Response(JSON.stringify({ 
+            error: 'Bu magaza kodu bulunamadi. Lutfen esnafin panelinde gorunen kodu dogru girdiginizden emin olun.',
+            debug_hint: `Aranan kod: "${String(store_id).trim()}"` 
+          }), {
             status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
@@ -149,7 +228,7 @@ Deno.serve(async (req: Request) => {
           });
         }
 
-        // Check 15 min cooldown for same store
+        // 15 min cooldown for same store
         const fifteenMinAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
         const { data: recentRequests } = await supabase
           .from('requests')
@@ -165,7 +244,7 @@ Deno.serve(async (req: Request) => {
           });
         }
 
-        // Check 3+ different stores in 5 min (anti-fraud)
+        // Anti-fraud: 3+ stores in 5 min
         const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
         const { data: recentAllRequests } = await supabase
           .from('requests')
@@ -177,28 +256,24 @@ Deno.serve(async (req: Request) => {
           const uniqueStores = new Set(recentAllRequests.map((r: any) => r.merchant_id));
           uniqueStores.add(merchant.id);
           if (uniqueStores.size >= 3) {
-            // Auto-suspend for 24 hours
             const suspendedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
             await supabase.from('customers').update({ is_suspended: true, suspended_until: suspendedUntil }).eq('id', customer.id);
-
-            // Log suspicious activity
             await supabase.from('suspicious_logs').insert({
               customer_id: customer.id,
               reason: '5 dakika icinde 3+ farkli magazaya talep',
               details: JSON.stringify({ stores: Array.from(uniqueStores), timestamp: new Date().toISOString() }),
             });
-
             return new Response(JSON.stringify({ error: 'Supheli aktivite tespit edildi. Hesabiniz 24 saat askiya alindi.' }), {
               status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
             });
           }
         }
 
-        // Create the request
+        // Create request - amount is 0, merchant will set it during approval
         const { data: newRequest, error: insertError } = await supabase.from('requests').insert({
           customer_id: customer.id,
           merchant_id: merchant.id,
-          amount: parseFloat(amount) || 0,
+          amount: 0,
           payment_type: payment_type || 'cash',
           status: 'pending',
           latitude: latitude || null,
@@ -216,12 +291,14 @@ Deno.serve(async (req: Request) => {
           success: true,
           request: newRequest,
           merchant_name: merchant.store_name,
+          matched_store_id: merchant.store_id,
+          matched_merchant_id: merchant.id,
         }), {
           status: 201, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
 
-      // Merchant approves/rejects a request
+      // Merchant approves/rejects
       if (action === 'respond') {
         const { request_id, response, points, amount: responseAmount, payment_type: responsePaymentType } = body;
 
@@ -238,7 +315,6 @@ Deno.serve(async (req: Request) => {
           });
         }
 
-        // Verify request belongs to this merchant
         const { data: request } = await supabase.from('requests').select('*').eq('id', request_id).eq('merchant_id', merchant.id).eq('status', 'pending').single();
         if (!request) {
           return new Response(JSON.stringify({ error: 'Talep bulunamadi veya zaten islendi' }), {
@@ -246,26 +322,22 @@ Deno.serve(async (req: Request) => {
           });
         }
 
-        // Update request status
         await supabase.from('requests').update({
           status: response,
           responded_at: new Date().toISOString(),
         }).eq('id', request_id);
 
-        // If approved, create transaction and add points
         if (response === 'approved' && points && points > 0) {
-          // Create transaction
           await supabase.from('transactions').insert({
             customer_id: request.customer_id,
             merchant_id: merchant.id,
-            amount: request.amount,
+            amount: responseAmount || 0,
             points: points,
             type: 'earn',
-            payment_type: request.payment_type || 'cash',
+            payment_type: responsePaymentType || request.payment_type || 'cash',
             status: 'completed',
           });
 
-          // Update customer points
           const { data: customerData } = await supabase.from('customers').select('points_balance, total_points_earned').eq('id', request.customer_id).single();
           if (customerData) {
             await supabase.from('customers').update({
@@ -274,11 +346,10 @@ Deno.serve(async (req: Request) => {
             }).eq('id', request.customer_id);
           }
 
-          // Update merchant revenue
           const { data: merchantData } = await supabase.from('merchants').select('total_revenue, total_transactions').eq('id', merchant.id).single();
           if (merchantData) {
             await supabase.from('merchants').update({
-              total_revenue: (merchantData.total_revenue || 0) + request.amount,
+              total_revenue: (merchantData.total_revenue || 0) + (responseAmount || 0),
               total_transactions: (merchantData.total_transactions || 0) + 1,
             }).eq('id', merchant.id);
           }
