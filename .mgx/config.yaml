@@ -1,0 +1,5 @@
+project_type: react
+dev_command: npm run dev
+install_command: npm install
+build_command: npm run build
+root_dir: /workspace/app
