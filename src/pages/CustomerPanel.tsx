@@ -78,18 +78,28 @@ export function CustomerPanel() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
 
-      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/transactions`;
-      const response = await fetch(apiUrl, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-        },
-      });
+      // Get customer record
+      const { data: customerData } = await supabase
+        .from('customers')
+        .select('id')
+        .eq('user_id', session.user.id)
+        .single();
 
-      const data = await response.json();
-      if (response.ok) {
-        setTransactions(data.transactions || []);
+      if (!customerData) {
+        setLoading(false);
+        return;
+      }
+
+      // Fetch transactions directly from Supabase
+      const { data: txData, error } = await supabase
+        .from('transactions')
+        .select('*, merchants (store_name, store_id)')
+        .eq('customer_id', customerData.id)
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (!error && txData) {
+        setTransactions(txData as any);
       }
     } catch (err) {
       console.error('Error fetching transactions:', err);
@@ -103,18 +113,25 @@ export function CustomerPanel() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
 
-      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/requests`;
-      const response = await fetch(apiUrl, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-        },
-      });
+      // Get customer record
+      const { data: customerData } = await supabase
+        .from('customers')
+        .select('id')
+        .eq('user_id', session.user.id)
+        .single();
 
-      const data = await response.json();
-      if (response.ok) {
-        setPendingRequests((data.requests || []).filter((r: any) => r.status === 'pending'));
+      if (!customerData) return;
+
+      // Fetch pending requests directly from Supabase
+      const { data: reqData, error } = await supabase
+        .from('requests')
+        .select('*, merchants (store_name, store_id)')
+        .eq('customer_id', customerData.id)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false });
+
+      if (!error && reqData) {
+        setPendingRequests(reqData as any);
       }
     } catch (err) {
       console.error('Error fetching requests:', err);
@@ -271,65 +288,35 @@ export function CustomerPanel() {
         return;
       }
 
-      const baseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const headers = {
-        'Authorization': `Bearer ${session.access_token}`,
-        'Content-Type': 'application/json',
-      };
       const cleanCode = code.trim();
 
-      // Step 1: Find merchant via merchant-get
-      let merchantId: string | null = null;
-      let merchantName: string | null = null;
-
-      try {
-        const merchantGetUrl = `${baseUrl}/functions/v1/merchant-get?store_id=${encodeURIComponent(cleanCode)}`;
-        const merchantRes = await fetch(merchantGetUrl, { method: 'GET', headers });
-        const merchantData = await merchantRes.json();
-
-        if (merchantRes.ok && merchantData.success && merchantData.merchant) {
-          merchantId = merchantData.merchant.id;
-          merchantName = merchantData.merchant.store_name;
-        }
-      } catch (e) {
-        console.warn('merchant-get fallback failed:', e);
-      }
-
-      // Step 2: Send request
-      const requestUrl = `${baseUrl}/functions/v1/requests?action=create`;
-      const requestBody: any = {
-        payment_type: 'cash',
-      };
-
-      if (merchantId) {
-        requestBody.merchant_id = merchantId;
-        requestBody.store_id = cleanCode;
-      } else {
-        requestBody.store_id = cleanCode;
-      }
-
-      const response = await fetch(requestUrl, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(requestBody),
+      // DOĞRUDAN Supabase RPC çağrısı - Edge Function YOK
+      const { data: rpcResult, error: rpcError } = await supabase.rpc('create_point_request', {
+        p_store_code: cleanCode,
+        p_customer_phone: customer?.phone || '',
+        p_amount: 0,
       });
 
-      const data = await response.json();
+      if (rpcError) {
+        console.error('RPC error:', rpcError);
+        setMessage({ type: 'error', text: 'Sunucu hatası: ' + (rpcError.message || 'Bilinmeyen hata') });
+        setProcessing(false);
+        return;
+      }
 
-      if (response.ok && data.success) {
-        const name = data.merchant_name || merchantName || 'Mağaza';
+      // Parse RPC result
+      const result = typeof rpcResult === 'string' ? JSON.parse(rpcResult) : rpcResult;
+
+      if (result && result.success) {
+        const name = result.store_name || 'Mağaza';
         setMessage({ type: 'success', text: `Puan talebi "${name}" mağazasına gönderildi! Esnaf onayını bekleyin.` });
         setStoreCode('');
         fetchPendingRequests();
         refreshProfile();
       } else {
-        let errorText = data.error || 'Talep gönderilemedi';
-        if (errorText.includes('bulunamadi') || errorText.includes('Gecersiz magaza')) {
+        let errorText = result?.error || 'Talep gönderilemedi';
+        if (errorText.includes('bulunamadi') || errorText.includes('bulunamadı')) {
           errorText = 'Bu mağaza kodu bulunamadı. Lütfen esnaftan doğru kodu alın.';
-        } else if (errorText.includes('15 dakika')) {
-          errorText = 'Aynı mağazaya 15 dakika içinde tekrar talep gönderemezsiniz.';
-        } else if (errorText.includes('askiya')) {
-          errorText = 'Hesabınız geçici olarak askıya alındı.';
         }
         setMessage({ type: 'error', text: errorText });
       }
