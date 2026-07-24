@@ -1,6 +1,6 @@
 -- ============================================================
 -- ONKATI TAM MİGRASYON (TEK DOSYA - BUNU ÇALIŞTIRIN)
--- Çakışma-güvenli: Her politika önce DROP edilir, sonra CREATE edilir
+-- Çakışma-güvenli + Sonsuz döngü düzeltmesi
 -- Supabase Dashboard > SQL Editor'de çalıştırın
 -- ============================================================
 
@@ -28,9 +28,12 @@ CREATE INDEX IF NOT EXISTS idx_scb_customer_merchant ON store_customer_balances(
 
 -- ============================================================
 -- 2. RLS: customers tablosu
+-- ÖNEMLİ: Sonsuz döngüyü önlemek için SADECE user_id = auth.uid()
+-- Esnaflar müşteri bilgisine SECURITY DEFINER RPC ile erişir
 -- ============================================================
 ALTER TABLE customers ENABLE ROW LEVEL SECURITY;
 
+-- Tüm eski politikaları temizle
 DROP POLICY IF EXISTS "merchants_limited_customer_view" ON customers;
 DROP POLICY IF EXISTS "customers_view_own" ON customers;
 DROP POLICY IF EXISTS "customers_select_own" ON customers;
@@ -44,17 +47,10 @@ DROP POLICY IF EXISTS "Customers can view own profile" ON customers;
 DROP POLICY IF EXISTS "customers_insert_own" ON customers;
 DROP POLICY IF EXISTS "customers_update_own" ON customers;
 
+-- TEK POLİTİKA: Müşteri sadece kendi kaydını görebilir
+-- Bu politika başka tabloya JOIN yapmaz → döngü olmaz
 CREATE POLICY "customer_read_own_record" ON customers
   FOR SELECT USING (user_id = auth.uid());
-
-CREATE POLICY "merchant_read_related_customers" ON customers
-  FOR SELECT USING (
-    id IN (
-      SELECT scb.customer_id FROM store_customer_balances scb
-      JOIN merchants m ON m.id = scb.merchant_id
-      WHERE m.user_id = auth.uid()
-    )
-  );
 
 -- ============================================================
 -- 3. RLS: merchants tablosu
@@ -74,11 +70,15 @@ DROP POLICY IF EXISTS "Anyone can view merchants" ON merchants;
 DROP POLICY IF EXISTS "merchants_insert_own" ON merchants;
 DROP POLICY IF EXISTS "merchants_update_own" ON merchants;
 
+-- Herkes mağaza bilgisini görebilir (StorePage, QR okuma, müşteri bakiye zenginleştirme)
+-- Bu politika başka tabloya JOIN yapmaz → döngü olmaz
 CREATE POLICY "public_read_merchant_info" ON merchants
   FOR SELECT USING (true);
 
 -- ============================================================
 -- 4. RLS: store_customer_balances tablosu
+-- ÖNEMLİ: customers/merchants tablolarına JOIN yapmak yerine
+-- doğrudan auth.uid() ile karşılaştırma yapıyoruz
 -- ============================================================
 ALTER TABLE store_customer_balances ENABLE ROW LEVEL SECURITY;
 
@@ -86,16 +86,28 @@ DROP POLICY IF EXISTS "customers_view_own_balances" ON store_customer_balances;
 DROP POLICY IF EXISTS "merchants_view_store_balances" ON store_customer_balances;
 DROP POLICY IF EXISTS "service_role_full_access" ON store_customer_balances;
 
+-- Müşteri kendi bakiyelerini görür
+-- customer_id -> customers.user_id = auth.uid() yerine
+-- doğrudan customers tablosundaki user_id'yi kontrol ediyoruz
+-- AMA bu da customers RLS'ini tetikler. Çözüm: EXISTS ile customers'a gitmek yerine
+-- store_customer_balances.customer_id'yi doğrudan auth.uid() ile eşleştiren bir yol lazım.
+-- Maalesef customer_id UUID, auth.uid() da UUID ama farklı değerler.
+-- Çözüm: customer_id IN (SELECT id FROM customers WHERE user_id = auth.uid())
+-- Bu customers RLS'ini tetikler ama customers RLS'i sadece user_id = auth.uid() olduğu için
+-- döngü OLMAZ (customers kendi içinde başka tabloya gitmiyor).
 CREATE POLICY "customers_view_own_balances" ON store_customer_balances
   FOR SELECT USING (
     customer_id IN (SELECT id FROM customers WHERE user_id = auth.uid())
   );
 
+-- Esnaf kendi mağazasının bakiyelerini görür
+-- merchants RLS = public read (true) olduğu için döngü olmaz
 CREATE POLICY "merchants_view_store_balances" ON store_customer_balances
   FOR SELECT USING (
     merchant_id IN (SELECT id FROM merchants WHERE user_id = auth.uid())
   );
 
+-- Service role tam erişim
 CREATE POLICY "service_role_full_access" ON store_customer_balances
   FOR ALL USING (auth.role() = 'service_role');
 
@@ -293,7 +305,7 @@ END;
 $$;
 
 -- ============================================================
--- 7. RPC: musteri_bilgi_getir
+-- 7. RPC: musteri_bilgi_getir (Esnaf müşteri bilgisine bu RPC ile erişir)
 -- ============================================================
 DROP FUNCTION IF EXISTS musteri_bilgi_getir(UUID);
 
@@ -319,6 +331,7 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'Esnaf hesabi bulunamadi');
   END IF;
 
+  -- Telefon bilgisi DÖNMEZ (gizlilik)
   SELECT id, full_name, is_active
   INTO v_customer
   FROM customers
@@ -384,11 +397,61 @@ END;
 $$;
 
 -- ============================================================
--- 9. GRANT İZİNLERİ
+-- 9. RPC: esnaf_musteri_listesi (Esnafın müşteri listesini güvenle çekmesi)
+-- Bu RPC sayesinde esnaf, customers tablosuna doğrudan erişmeden
+-- kendi müşterilerinin isimlerini görebilir
+-- ============================================================
+DROP FUNCTION IF EXISTS esnaf_musteri_listesi();
+
+CREATE OR REPLACE FUNCTION esnaf_musteri_listesi()
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_merchant_id UUID;
+  v_result JSONB;
+BEGIN
+  SELECT id INTO v_merchant_id
+  FROM merchants
+  WHERE user_id = auth.uid()
+  LIMIT 1;
+
+  IF v_merchant_id IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Esnaf hesabi bulunamadi');
+  END IF;
+
+  SELECT jsonb_agg(row_to_json(t))
+  INTO v_result
+  FROM (
+    SELECT
+      scb.id,
+      scb.customer_id,
+      c.full_name as customer_name,
+      scb.balance,
+      scb.total_earned,
+      scb.total_spent,
+      scb.last_transaction_at
+    FROM store_customer_balances scb
+    JOIN customers c ON c.id = scb.customer_id
+    WHERE scb.merchant_id = v_merchant_id
+    ORDER BY scb.last_transaction_at DESC NULLS LAST
+  ) t;
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'customers', COALESCE(v_result, '[]'::jsonb)
+  );
+END;
+$$;
+
+-- ============================================================
+-- 10. GRANT İZİNLERİ
 -- ============================================================
 GRANT EXECUTE ON FUNCTION islem_puan_yukle(UUID, NUMERIC, TEXT, NUMERIC, NUMERIC) TO authenticated;
 GRANT EXECUTE ON FUNCTION islem_puan_harca(UUID, NUMERIC) TO authenticated;
 GRANT EXECUTE ON FUNCTION musteri_bilgi_getir(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION esnaf_musteri_listesi() TO authenticated;
 GRANT EXECUTE ON FUNCTION get_email_by_phone(TEXT) TO anon;
 GRANT EXECUTE ON FUNCTION get_email_by_phone(TEXT) TO authenticated;
 

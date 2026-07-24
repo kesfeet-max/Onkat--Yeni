@@ -87,8 +87,8 @@ export function MerchantPanel() {
       navigate('/giris');
       return;
     }
-    fetchTransactions();
-    fetchMyCustomers();
+    // Önce müşterileri yükle, sonra işlemleri (isimleri eşleştirmek için)
+    fetchMyCustomers().then(() => fetchTransactions());
     fetchMerchantSettings();
   }, [authLoading, user, navigate]);
 
@@ -118,6 +118,19 @@ export function MerchantPanel() {
     };
   }, [merchant?.id]);
 
+  // myCustomers güncellendiğinde transaction isimlerini eşleştir
+  useEffect(() => {
+    if (myCustomers.length === 0 || transactions.length === 0) return;
+    
+    const needsUpdate = transactions.some(t => t.customer_name === 'Müşteri');
+    if (!needsUpdate) return;
+
+    setTransactions(prev => prev.map(t => ({
+      ...t,
+      customer_name: myCustomers.find(c => c.customer_id === t.customer_id)?.customer_name || t.customer_name || 'Müşteri',
+    })));
+  }, [myCustomers]);
+
   const fetchTransactions = async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -143,22 +156,11 @@ export function MerchantPanel() {
         .limit(100);
 
       if (!error && txData) {
-        const customerIds = [...new Set(txData.map((t: any) => t.customer_id))];
-        let customers: any[] = [];
-        if (customerIds.length > 0) {
-          const { data: custData } = await supabase
-            .from('customers')
-            .select('id, full_name')
-            .in('id', customerIds);
-          customers = custData || [];
-        }
-
-        const enriched = txData.map((t: any) => ({
+        // İsimleri sonradan eşleştireceğiz (enrichTransactions effect'inde)
+        setTransactions(txData.map((t: any) => ({
           ...t,
-          customer_name: customers.find((c: any) => c.id === t.customer_id)?.full_name || 'Müşteri',
-        }));
-
-        setTransactions(enriched);
+          customer_name: 'Müşteri', // Geçici — enrichTransactions güncelleyecek
+        })));
       }
     } catch (err) {
       console.error('Error fetching transactions:', err);
@@ -169,80 +171,76 @@ export function MerchantPanel() {
 
   const fetchMyCustomers = useCallback(async () => {
     try {
-      if (!merchant?.id) {
-        // merchant henüz yüklenmemişse session'dan al
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) return;
+      // RPC kullan — customers tablosuna doğrudan erişim yok (RLS döngüsünü önler)
+      const { data: result, error } = await supabase.rpc('esnaf_musteri_listesi');
 
-        const { data: merchantData } = await supabase
-          .from('merchants')
-          .select('id')
-          .eq('user_id', session.user.id)
-          .single();
+      if (error) {
+        console.warn('esnaf_musteri_listesi RPC error, falling back to direct query:', error.message);
+        // Fallback: RPC henüz deploy edilmemişse store_customer_balances'tan çek
+        await fetchMyCustomersFallback();
+        return;
+      }
 
-        if (!merchantData) return;
-
-        const { data: balances, error } = await supabase
-          .from('store_customer_balances')
-          .select('*')
-          .eq('merchant_id', merchantData.id)
-          .order('last_transaction_at', { ascending: false });
-
-        if (error || !balances) {
-          setMyCustomers([]);
-          return;
-        }
-
-        const customerIds = balances.map((b: any) => b.customer_id);
-        let customers: any[] = [];
-        if (customerIds.length > 0) {
-          const { data: custData } = await supabase
-            .from('customers')
-            .select('id, full_name')
-            .in('id', customerIds);
-          customers = custData || [];
-        }
-
-        const enriched = balances.map((b: any) => ({
-          ...b,
-          customer_name: customers.find((c: any) => c.id === b.customer_id)?.full_name || 'Müşteri',
+      if (result?.success && result.customers) {
+        const customers = (result.customers as any[]).map((c: any) => ({
+          id: c.id,
+          customer_id: c.customer_id,
+          balance: c.balance || 0,
+          total_earned: c.total_earned || 0,
+          total_spent: c.total_spent || 0,
+          last_transaction_at: c.last_transaction_at,
+          customer_name: c.customer_name || 'Müşteri',
         }));
-
-        setMyCustomers(enriched);
+        setMyCustomers(customers);
       } else {
-        const { data: balances, error } = await supabase
-          .from('store_customer_balances')
-          .select('*')
-          .eq('merchant_id', merchant.id)
-          .order('last_transaction_at', { ascending: false });
-
-        if (error || !balances) {
-          setMyCustomers([]);
-          return;
-        }
-
-        const customerIds = balances.map((b: any) => b.customer_id);
-        let customers: any[] = [];
-        if (customerIds.length > 0) {
-          const { data: custData } = await supabase
-            .from('customers')
-            .select('id, full_name')
-            .in('id', customerIds);
-          customers = custData || [];
-        }
-
-        const enriched = balances.map((b: any) => ({
-          ...b,
-          customer_name: customers.find((c: any) => c.id === b.customer_id)?.full_name || 'Müşteri',
-        }));
-
-        setMyCustomers(enriched);
+        setMyCustomers([]);
       }
     } catch (err) {
       console.error('Error fetching customers:', err);
       setMyCustomers([]);
     }
-  }, [merchant?.id]);
+  }, []);
+
+  const fetchMyCustomersFallback = async () => {
+    try {
+      const merchantId = merchant?.id;
+      if (!merchantId) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) return;
+        const { data: merchantData } = await supabase
+          .from('merchants')
+          .select('id')
+          .eq('user_id', session.user.id)
+          .single();
+        if (!merchantData) return;
+
+        const { data: balances } = await supabase
+          .from('store_customer_balances')
+          .select('*')
+          .eq('merchant_id', merchantData.id)
+          .order('last_transaction_at', { ascending: false });
+
+        setMyCustomers((balances || []).map((b: any) => ({
+          ...b,
+          customer_name: 'Müşteri',
+        })));
+      } else {
+        const { data: balances } = await supabase
+          .from('store_customer_balances')
+          .select('*')
+          .eq('merchant_id', merchantId)
+          .order('last_transaction_at', { ascending: false });
+
+        setMyCustomers((balances || []).map((b: any) => ({
+          ...b,
+          customer_name: 'Müşteri',
+        })));
+      }
+    } catch (err) {
+      console.error('Fallback customer fetch error:', err);
+      setMyCustomers([]);
+    }
+  };
 
   const fetchMerchantSettings = async () => {
     const savedCash = localStorage.getItem('onkati_cash_rate');
