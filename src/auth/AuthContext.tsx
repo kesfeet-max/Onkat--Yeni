@@ -23,15 +23,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const fetchingRef = useRef(false);
+  const mountedRef = useRef(true);
 
   const fetchProfile = useCallback(async (userId: string): Promise<CustomerProfile | MerchantProfile | null> => {
-    // Sonsuz döngü koruması
     if (fetchingRef.current) return null;
     fetchingRef.current = true;
 
     try {
-      // Önce müşteri profili dene — sadece kesin var olan kolonları seç
-      // RLS hatası olursa error döner, data null olur
+      // Müşteri profili — güvenli kolon seçimi
       const { data: customerData, error: custErr } = await supabase
         .from('customers')
         .select('id, user_id, full_name, phone, is_active, created_at')
@@ -39,8 +38,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .maybeSingle();
 
       if (!custErr && customerData) {
-        setUserRole('customer');
-        // Eksik alanları güvenli default'larla doldur
         const safeCustomer: CustomerProfile = {
           id: customerData.id,
           user_id: customerData.user_id,
@@ -53,10 +50,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           created_at: customerData.created_at || '',
           updated_at: '',
         };
+        if (mountedRef.current) setUserRole('customer');
         return safeCustomer;
       }
 
-      // Müşteri bulunamadı veya hata aldı — esnaf dene
+      // Esnaf profili
       const { data: merchantData, error: merchErr } = await supabase
         .from('merchants')
         .select('id, user_id, store_id, store_name, full_name, phone, city, district, sector, is_active, created_at')
@@ -64,7 +62,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .maybeSingle();
 
       if (!merchErr && merchantData) {
-        setUserRole('merchant');
         const safeMerchant: MerchantProfile = {
           id: merchantData.id,
           user_id: merchantData.user_id,
@@ -84,19 +81,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           created_at: merchantData.created_at || '',
           updated_at: '',
         };
+        if (mountedRef.current) setUserRole('merchant');
         return safeMerchant;
       }
 
-      // Her iki tablo da sonuç vermedi
-      // RLS hatası mı yoksa gerçekten kayıt yok mu logla
-      if (custErr) {
-        console.warn('Customer profile fetch RLS/error:', custErr.message);
-      }
-      if (merchErr) {
-        console.warn('Merchant profile fetch RLS/error:', merchErr.message);
-      }
+      // Her iki tablo da sonuç vermedi — logla
+      if (custErr) console.warn('Customer profile RLS/error:', custErr.message);
+      if (merchErr) console.warn('Merchant profile RLS/error:', merchErr.message);
 
-      // Kullanıcı auth var ama profil yok — user_metadata'dan role tahmin et
       return null;
     } catch (err) {
       console.error('Profile fetch unexpected error:', err);
@@ -116,13 +108,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    let mounted = true;
+    mountedRef.current = true;
 
     const initializeAuth = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
 
-        if (session?.user && mounted) {
+        if (session?.user && mountedRef.current) {
           const authUser: User = {
             id: session.user.id,
             email: session.user.email,
@@ -132,9 +124,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setUser(authUser);
 
           const userProfile = await fetchProfile(session.user.id);
-          if (mounted) {
+          if (mountedRef.current) {
             setProfile(userProfile);
-            // Profil bulunamadıysa ama user_metadata'da role varsa onu kullan
             if (!userProfile && session.user.user_metadata?.role) {
               setUserRole(session.user.user_metadata.role as UserRole);
             }
@@ -142,16 +133,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       } catch (err) {
         console.error('Auth initialization error:', err);
-        if (mounted) setError('Kimlik doğrulama hatası');
+        if (mountedRef.current) setError('Kimlik doğrulama hatası');
       } finally {
-        if (mounted) setLoading(false);
+        if (mountedRef.current) setLoading(false);
       }
     };
 
     initializeAuth();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (!mounted) return;
+      if (!mountedRef.current) return;
 
       if (event === 'SIGNED_OUT') {
         setUser(null);
@@ -165,8 +156,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           role: session.user.user_metadata?.role,
         };
         setUser(authUser);
+        // Profil çekmeyi hemen başlat — loading zaten true
         fetchProfile(session.user.id).then((userProfile) => {
-          if (mounted) {
+          if (mountedRef.current) {
             setProfile(userProfile);
             if (!userProfile && session.user.user_metadata?.role) {
               setUserRole(session.user.user_metadata.role as UserRole);
@@ -177,7 +169,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     return () => {
-      mounted = false;
+      mountedRef.current = false;
       subscription.unsubscribe();
     };
   }, [fetchProfile]);
@@ -187,25 +179,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(true);
 
     try {
-      // Telefon numarasını temizle
       const cleanedPhone = phone.replace(/\D/g, '');
 
-      // RPC ile email bul (RLS bypass - SECURITY DEFINER)
+      // RPC ile email bul
       let email: string | null = null;
       try {
         const { data: rpcResult, error: rpcError } = await supabase.rpc('get_email_by_phone', {
           p_phone: cleanedPhone,
         });
-
         if (!rpcError && rpcResult?.success) {
           email = rpcResult.email;
         }
-      } catch (rpcErr) {
-        // RPC mevcut değilse veya hata verirse sessizce devam et
-        console.warn('get_email_by_phone RPC failed, using fallback:', rpcErr);
+      } catch {
+        // RPC yoksa fallback
       }
 
-      // Fallback: eski format
       if (!email) {
         email = `${cleanedPhone}@onkati.local`;
       }
@@ -231,8 +219,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         const userProfile = await fetchProfile(data.user.id);
         setProfile(userProfile);
-
-        // Profil bulunamadıysa user_metadata'dan role al
         if (!userProfile && data.user.user_metadata?.role) {
           setUserRole(data.user.user_metadata.role as UserRole);
         }
@@ -273,7 +259,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         const userProfile = await fetchProfile(data.user.id);
         setProfile(userProfile);
-
         if (!userProfile && data.user.user_metadata?.role) {
           setUserRole(data.user.user_metadata.role as UserRole);
         }
@@ -291,7 +276,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const refreshProfile = useCallback(async () => {
     if (user?.id) {
       const userProfile = await fetchProfile(user.id);
-      setProfile(userProfile);
+      if (mountedRef.current) setProfile(userProfile);
     }
   }, [user, fetchProfile]);
 

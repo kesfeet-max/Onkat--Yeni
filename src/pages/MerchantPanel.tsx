@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   QrCode,
@@ -15,18 +15,31 @@ import {
   Settings,
   TrendingUp,
   Users,
+  Store,
+  ArrowDownRight,
+  ArrowUpRight,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { supabase } from '../lib/supabase';
 import { formatCurrency, formatDate } from '../lib/utils';
 
-type MerchantTab = 'islem' | 'gecmis' | 'ayarlar';
+type MerchantTab = 'islem' | 'musteriler' | 'gecmis' | 'ayarlar';
 
 interface CustomerInfo {
   customer_id: string;
   customer_name: string;
   store_balance: number;
   store_name: string;
+}
+
+interface CustomerRecord {
+  id: string;
+  customer_id: string;
+  balance: number;
+  total_earned: number;
+  total_spent: number;
+  last_transaction_at: string | null;
+  customer_name: string;
 }
 
 interface TransactionRecord {
@@ -41,11 +54,12 @@ interface TransactionRecord {
 }
 
 export function MerchantPanel() {
-  const { user, profile, signOut } = useAuth();
+  const { user, profile, loading: authLoading, signOut } = useAuth();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<MerchantTab>('islem');
   const [loading, setLoading] = useState(true);
   const [transactions, setTransactions] = useState<TransactionRecord[]>([]);
+  const [myCustomers, setMyCustomers] = useState<CustomerRecord[]>([]);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [cashPointsRate, setCashPointsRate] = useState<number>(7);
   const [cardPointsRate, setCardPointsRate] = useState<number>(5);
@@ -68,15 +82,17 @@ export function MerchantPanel() {
   const merchant = profile as any;
 
   useEffect(() => {
+    if (authLoading) return;
     if (!user) {
       navigate('/giris');
       return;
     }
     fetchTransactions();
+    fetchMyCustomers();
     fetchMerchantSettings();
-  }, [user, navigate]);
+  }, [authLoading, user, navigate]);
 
-  // Realtime: yeni işlemleri dinle
+  // Realtime
   useEffect(() => {
     if (!merchant?.id) return;
 
@@ -92,6 +108,7 @@ export function MerchantPanel() {
         },
         () => {
           fetchTransactions();
+          fetchMyCustomers();
         }
       )
       .subscribe();
@@ -126,16 +143,19 @@ export function MerchantPanel() {
         .limit(100);
 
       if (!error && txData) {
-        // Müşteri isimlerini getir
         const customerIds = [...new Set(txData.map((t: any) => t.customer_id))];
-        const { data: customers } = await supabase
-          .from('customers')
-          .select('id, full_name')
-          .in('id', customerIds);
+        let customers: any[] = [];
+        if (customerIds.length > 0) {
+          const { data: custData } = await supabase
+            .from('customers')
+            .select('id, full_name')
+            .in('id', customerIds);
+          customers = custData || [];
+        }
 
         const enriched = txData.map((t: any) => ({
           ...t,
-          customer_name: customers?.find((c: any) => c.id === t.customer_id)?.full_name || 'Müşteri',
+          customer_name: customers.find((c: any) => c.id === t.customer_id)?.full_name || 'Müşteri',
         }));
 
         setTransactions(enriched);
@@ -147,8 +167,84 @@ export function MerchantPanel() {
     }
   };
 
+  const fetchMyCustomers = useCallback(async () => {
+    try {
+      if (!merchant?.id) {
+        // merchant henüz yüklenmemişse session'dan al
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) return;
+
+        const { data: merchantData } = await supabase
+          .from('merchants')
+          .select('id')
+          .eq('user_id', session.user.id)
+          .single();
+
+        if (!merchantData) return;
+
+        const { data: balances, error } = await supabase
+          .from('store_customer_balances')
+          .select('*')
+          .eq('merchant_id', merchantData.id)
+          .order('last_transaction_at', { ascending: false });
+
+        if (error || !balances) {
+          setMyCustomers([]);
+          return;
+        }
+
+        const customerIds = balances.map((b: any) => b.customer_id);
+        let customers: any[] = [];
+        if (customerIds.length > 0) {
+          const { data: custData } = await supabase
+            .from('customers')
+            .select('id, full_name')
+            .in('id', customerIds);
+          customers = custData || [];
+        }
+
+        const enriched = balances.map((b: any) => ({
+          ...b,
+          customer_name: customers.find((c: any) => c.id === b.customer_id)?.full_name || 'Müşteri',
+        }));
+
+        setMyCustomers(enriched);
+      } else {
+        const { data: balances, error } = await supabase
+          .from('store_customer_balances')
+          .select('*')
+          .eq('merchant_id', merchant.id)
+          .order('last_transaction_at', { ascending: false });
+
+        if (error || !balances) {
+          setMyCustomers([]);
+          return;
+        }
+
+        const customerIds = balances.map((b: any) => b.customer_id);
+        let customers: any[] = [];
+        if (customerIds.length > 0) {
+          const { data: custData } = await supabase
+            .from('customers')
+            .select('id, full_name')
+            .in('id', customerIds);
+          customers = custData || [];
+        }
+
+        const enriched = balances.map((b: any) => ({
+          ...b,
+          customer_name: customers.find((c: any) => c.id === b.customer_id)?.full_name || 'Müşteri',
+        }));
+
+        setMyCustomers(enriched);
+      }
+    } catch (err) {
+      console.error('Error fetching customers:', err);
+      setMyCustomers([]);
+    }
+  }, [merchant?.id]);
+
   const fetchMerchantSettings = async () => {
-    // Mevcut oranları localStorage'dan al (veya DB'den)
     const savedCash = localStorage.getItem('onkati_cash_rate');
     const savedCard = localStorage.getItem('onkati_card_rate');
     if (savedCash) setCashPointsRate(parseFloat(savedCash));
@@ -169,18 +265,13 @@ export function MerchantPanel() {
     setShowScanner(true);
     setScannerReady(false);
 
-    // Dinamik import
     const { default: Html5QrcodeScanner } = await import('html5-qrcode').then(m => ({ default: m.Html5QrcodeScanner }));
 
     setTimeout(() => {
       if (scannerContainerRef.current) {
         const scanner = new Html5QrcodeScanner(
           'merchant-qr-reader',
-          {
-            fps: 10,
-            qrbox: { width: 250, height: 250 },
-            aspectRatio: 1,
-          },
+          { fps: 10, qrbox: { width: 250, height: 250 }, aspectRatio: 1 },
           false
         );
 
@@ -190,9 +281,7 @@ export function MerchantPanel() {
             scanner.clear();
             setShowScanner(false);
           },
-          (error: any) => {
-            // Scan error - ignore
-          }
+          () => {}
         );
 
         scannerRef.current = scanner;
@@ -203,11 +292,7 @@ export function MerchantPanel() {
 
   const stopScanner = () => {
     if (scannerRef.current) {
-      try {
-        scannerRef.current.clear();
-      } catch (e) {
-        // ignore
-      }
+      try { scannerRef.current.clear(); } catch {}
       scannerRef.current = null;
     }
     setShowScanner(false);
@@ -223,7 +308,6 @@ export function MerchantPanel() {
         return;
       }
 
-      // Müşteri bilgilerini getir (telefon GİZLİ - RPC kullanılıyor)
       const { data: result, error } = await supabase.rpc('musteri_bilgi_getir', {
         p_customer_id: parsed.customer_id,
       });
@@ -248,14 +332,13 @@ export function MerchantPanel() {
       setAmount('');
       setLastResult(null);
       setMessage(null);
-    } catch (err) {
+    } catch {
       setMessage({ type: 'error', text: 'QR kodu okunamadı. Lütfen tekrar deneyin.' });
     }
   };
 
   const handlePuanYukle = async () => {
     if (!customerInfo || !amount) return;
-
     const numAmount = parseFloat(amount);
     if (isNaN(numAmount) || numAmount <= 0) {
       setMessage({ type: 'error', text: 'Geçerli bir tutar girin' });
@@ -278,24 +361,19 @@ export function MerchantPanel() {
         setMessage({ type: 'error', text: 'İşlem hatası: ' + error.message });
         return;
       }
-
       if (!result.success) {
         setMessage({ type: 'error', text: result.error });
         return;
       }
 
       setLastResult(result);
-      setMessage({
-        type: 'success',
-        text: `Başarılı! ${numAmount} TL alışverişten ${result.points} puan yüklendi.`,
-      });
-
-      // Müşteri bilgisini güncelle
+      setMessage({ type: 'success', text: `${numAmount} TL → ${result.points} puan yüklendi!` });
       setCustomerInfo(prev => prev ? { ...prev, store_balance: result.new_balance } : null);
       setAmount('');
       setActionMode('idle');
       fetchTransactions();
-    } catch (err) {
+      fetchMyCustomers();
+    } catch {
       setMessage({ type: 'error', text: 'Beklenmeyen bir hata oluştu' });
     } finally {
       setProcessing(false);
@@ -304,7 +382,6 @@ export function MerchantPanel() {
 
   const handlePuanHarca = async () => {
     if (!customerInfo || !amount) return;
-
     const numPoints = parseFloat(amount);
     if (isNaN(numPoints) || numPoints <= 0) {
       setMessage({ type: 'error', text: 'Geçerli bir puan miktarı girin' });
@@ -324,24 +401,19 @@ export function MerchantPanel() {
         setMessage({ type: 'error', text: 'İşlem hatası: ' + error.message });
         return;
       }
-
       if (!result.success) {
         setMessage({ type: 'error', text: result.error });
         return;
       }
 
       setLastResult(result);
-      setMessage({
-        type: 'success',
-        text: `${numPoints} puan harcandı. Kalan bakiye: ${result.new_balance}`,
-      });
-
-      // Müşteri bilgisini güncelle
+      setMessage({ type: 'success', text: `${numPoints} puan harcandı. Kalan: ${result.new_balance}` });
       setCustomerInfo(prev => prev ? { ...prev, store_balance: result.new_balance } : null);
       setAmount('');
       setActionMode('idle');
       fetchTransactions();
-    } catch (err) {
+      fetchMyCustomers();
+    } catch {
       setMessage({ type: 'error', text: 'Beklenmeyen bir hata oluştu' });
     } finally {
       setProcessing(false);
@@ -356,29 +428,58 @@ export function MerchantPanel() {
     setMessage(null);
   };
 
-  if (loading) {
+  // Stats
+  const todayEarns = transactions.filter(t =>
+    t.type === 'earn' && new Date(t.created_at).toDateString() === new Date().toDateString()
+  );
+  const todaySpends = transactions.filter(t =>
+    t.type === 'spend' && new Date(t.created_at).toDateString() === new Date().toDateString()
+  );
+  const todayEarnPoints = todayEarns.reduce((s, t) => s + (t.points || 0), 0);
+  const todaySpendPoints = todaySpends.reduce((s, t) => s + (t.points || 0), 0);
+
+  if (authLoading || loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+      <div className="min-h-screen bg-gradient-to-b from-emerald-50 to-white flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-10 h-10 animate-spin text-emerald-600 mx-auto" />
+          <p className="mt-3 text-gray-500 text-sm">Yükleniyor...</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gradient-to-b from-emerald-50 via-white to-gray-50">
       {/* Header */}
-      <header className="bg-gradient-to-r from-emerald-700 to-emerald-600 text-white px-4 py-4 shadow-lg">
+      <header className="bg-gradient-to-r from-emerald-700 via-emerald-600 to-teal-600 text-white px-5 py-5 shadow-xl">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-bold">{merchant?.store_name || 'Esnaf Paneli'}</h1>
-            <p className="text-emerald-100 text-sm">Onkatı Esnaf Yönetimi</p>
+            <p className="text-emerald-200 text-xs font-medium uppercase tracking-wider">Onkatı Esnaf</p>
+            <h1 className="text-xl font-bold mt-0.5">{merchant?.store_name || 'Esnaf Paneli'}</h1>
           </div>
           <button
             onClick={signOut}
-            className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition"
+            className="p-2.5 rounded-xl bg-white/10 hover:bg-white/20 transition"
           >
             <LogOut className="w-5 h-5" />
           </button>
+        </div>
+
+        {/* Günlük Özet */}
+        <div className="mt-4 grid grid-cols-3 gap-2">
+          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-3 text-center border border-white/10">
+            <p className="text-2xl font-bold">{myCustomers.length}</p>
+            <p className="text-emerald-200 text-xs">Müşteri</p>
+          </div>
+          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-3 text-center border border-white/10">
+            <p className="text-2xl font-bold text-emerald-200">+{todayEarnPoints.toFixed(0)}</p>
+            <p className="text-emerald-200 text-xs">Bugün Yüklenen</p>
+          </div>
+          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-3 text-center border border-white/10">
+            <p className="text-2xl font-bold text-orange-200">{todaySpendPoints.toFixed(0)}</p>
+            <p className="text-emerald-200 text-xs">Bugün Harcanan</p>
+          </div>
         </div>
       </header>
 
@@ -402,86 +503,88 @@ export function MerchantPanel() {
       )}
 
       {/* Tab Navigation */}
-      <nav className="bg-white border-b sticky top-0 z-40">
+      <nav className="bg-white border-b shadow-sm sticky top-0 z-40">
         <div className="flex">
           <button
             onClick={() => setActiveTab('islem')}
-            className={`flex-1 py-3 px-2 text-center text-sm font-medium border-b-2 transition ${
+            className={`flex-1 py-3.5 px-1 text-center text-xs font-semibold border-b-3 transition ${
               activeTab === 'islem'
-                ? 'border-emerald-600 text-emerald-700'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
+                ? 'border-emerald-600 text-emerald-700 bg-emerald-50/50'
+                : 'border-transparent text-gray-500'
             }`}
           >
-            <QrCode className="w-4 h-4 mx-auto mb-1" />
+            <QrCode className="w-5 h-5 mx-auto mb-1" />
             İşlem
           </button>
           <button
-            onClick={() => setActiveTab('gecmis')}
-            className={`flex-1 py-3 px-2 text-center text-sm font-medium border-b-2 transition ${
-              activeTab === 'gecmis'
-                ? 'border-emerald-600 text-emerald-700'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
+            onClick={() => setActiveTab('musteriler')}
+            className={`flex-1 py-3.5 px-1 text-center text-xs font-semibold border-b-3 transition ${
+              activeTab === 'musteriler'
+                ? 'border-emerald-600 text-emerald-700 bg-emerald-50/50'
+                : 'border-transparent text-gray-500'
             }`}
           >
-            <History className="w-4 h-4 mx-auto mb-1" />
+            <Users className="w-5 h-5 mx-auto mb-1" />
+            Müşteriler
+          </button>
+          <button
+            onClick={() => setActiveTab('gecmis')}
+            className={`flex-1 py-3.5 px-1 text-center text-xs font-semibold border-b-3 transition ${
+              activeTab === 'gecmis'
+                ? 'border-emerald-600 text-emerald-700 bg-emerald-50/50'
+                : 'border-transparent text-gray-500'
+            }`}
+          >
+            <History className="w-5 h-5 mx-auto mb-1" />
             Geçmiş
           </button>
           <button
             onClick={() => setActiveTab('ayarlar')}
-            className={`flex-1 py-3 px-2 text-center text-sm font-medium border-b-2 transition ${
+            className={`flex-1 py-3.5 px-1 text-center text-xs font-semibold border-b-3 transition ${
               activeTab === 'ayarlar'
-                ? 'border-emerald-600 text-emerald-700'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
+                ? 'border-emerald-600 text-emerald-700 bg-emerald-50/50'
+                : 'border-transparent text-gray-500'
             }`}
           >
-            <Settings className="w-4 h-4 mx-auto mb-1" />
+            <Settings className="w-5 h-5 mx-auto mb-1" />
             Ayarlar
           </button>
         </div>
       </nav>
 
       {/* Content */}
-      <main className="p-4 pb-20 max-w-lg mx-auto">
+      <main className="p-4 pb-24 max-w-lg mx-auto">
         {/* İşlem Tab */}
         {activeTab === 'islem' && (
           <div className="space-y-4">
-            {/* QR Scanner veya Müşteri Bilgisi */}
             {!customerInfo ? (
               <>
-                {/* QR Okut Butonu */}
                 {!showScanner ? (
-                  <div className="bg-white rounded-2xl shadow-md p-6 text-center">
-                    <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <div className="bg-white rounded-2xl shadow-lg p-6 text-center border border-gray-100">
+                    <div className="w-20 h-20 bg-gradient-to-br from-emerald-100 to-teal-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
                       <Camera className="w-10 h-10 text-emerald-600" />
                     </div>
-                    <h2 className="text-lg font-semibold text-gray-800 mb-2">Müşteri QR Kodunu Okut</h2>
+                    <h2 className="text-lg font-bold text-gray-800 mb-2">Müşteri QR Kodunu Okut</h2>
                     <p className="text-gray-500 text-sm mb-5">
                       Müşterinin telefonundaki QR kodu kameranıza göstermesini isteyin
                     </p>
                     <button
                       onClick={startScanner}
-                      className="w-full bg-emerald-600 text-white py-4 rounded-xl font-semibold text-lg hover:bg-emerald-700 transition flex items-center justify-center gap-2"
+                      className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 text-white py-4 rounded-xl font-bold text-lg hover:from-emerald-700 hover:to-teal-700 transition shadow-lg shadow-emerald-200 flex items-center justify-center gap-2"
                     >
                       <QrCode className="w-5 h-5" />
                       QR Kodu Tara
                     </button>
                   </div>
                 ) : (
-                  <div className="bg-white rounded-2xl shadow-md p-4">
+                  <div className="bg-white rounded-2xl shadow-lg p-4 border border-gray-100">
                     <div className="flex items-center justify-between mb-3">
-                      <h3 className="font-semibold text-gray-800">QR Tarayıcı</h3>
-                      <button
-                        onClick={stopScanner}
-                        className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200"
-                      >
+                      <h3 className="font-bold text-gray-800">QR Tarayıcı</h3>
+                      <button onClick={stopScanner} className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200">
                         <X className="w-5 h-5 text-gray-600" />
                       </button>
                     </div>
-                    <div
-                      id="merchant-qr-reader"
-                      ref={scannerContainerRef}
-                      className="rounded-xl overflow-hidden"
-                    />
+                    <div id="merchant-qr-reader" ref={scannerContainerRef} className="rounded-xl overflow-hidden" />
                     {!scannerReady && (
                       <div className="flex items-center justify-center py-4">
                         <Loader2 className="w-6 h-6 animate-spin text-emerald-600" />
@@ -490,142 +593,98 @@ export function MerchantPanel() {
                     )}
                   </div>
                 )}
-
-                {/* Bugünkü Özet */}
-                <div className="bg-white rounded-xl p-4 shadow-sm">
-                  <h3 className="font-medium text-gray-700 mb-3 flex items-center gap-2">
-                    <TrendingUp className="w-4 h-4 text-emerald-600" />
-                    Bugünkü Özet
-                  </h3>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="bg-emerald-50 rounded-lg p-3 text-center">
-                      <p className="text-2xl font-bold text-emerald-700">
-                        {transactions.filter(t =>
-                          t.type === 'earn' &&
-                          new Date(t.created_at).toDateString() === new Date().toDateString()
-                        ).length}
-                      </p>
-                      <p className="text-xs text-emerald-600">Puan Yükleme</p>
-                    </div>
-                    <div className="bg-orange-50 rounded-lg p-3 text-center">
-                      <p className="text-2xl font-bold text-orange-700">
-                        {transactions.filter(t =>
-                          t.type === 'spend' &&
-                          new Date(t.created_at).toDateString() === new Date().toDateString()
-                        ).length}
-                      </p>
-                      <p className="text-xs text-orange-600">Puan Harcama</p>
-                    </div>
-                  </div>
-                </div>
               </>
             ) : (
               <>
-                {/* Müşteri Bilgisi Kartı */}
-                <div className="bg-white rounded-2xl shadow-md p-5 border-2 border-emerald-100">
+                {/* Müşteri Bilgisi */}
+                <div className="bg-white rounded-2xl shadow-lg p-5 border-2 border-emerald-100">
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center">
+                      <div className="w-12 h-12 bg-gradient-to-br from-emerald-100 to-teal-100 rounded-xl flex items-center justify-center">
                         <Users className="w-6 h-6 text-emerald-600" />
                       </div>
                       <div>
-                        <p className="font-semibold text-gray-900">{customerInfo.customer_name}</p>
+                        <p className="font-bold text-gray-900">{customerInfo.customer_name}</p>
                         <p className="text-sm text-gray-500">Müşteri</p>
                       </div>
                     </div>
-                    <button
-                      onClick={resetCustomer}
-                      className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200"
-                    >
+                    <button onClick={resetCustomer} className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200">
                       <X className="w-5 h-5 text-gray-500" />
                     </button>
                   </div>
 
-                  <div className="bg-emerald-50 rounded-xl p-4">
-                    <p className="text-sm text-emerald-700">Bu dükkandaki bakiyesi:</p>
-                    <p className="text-3xl font-bold text-emerald-800 mt-1">
-                      {customerInfo.store_balance.toFixed(2)} <span className="text-lg">Puan</span>
+                  <div className="bg-gradient-to-r from-emerald-50 to-teal-50 rounded-xl p-4 border border-emerald-100">
+                    <p className="text-sm text-emerald-700 font-medium">Bu dükkandaki bakiyesi:</p>
+                    <p className="text-3xl font-black text-emerald-800 mt-1">
+                      {customerInfo.store_balance.toFixed(2)} <span className="text-lg font-medium">Puan</span>
                     </p>
                   </div>
                 </div>
 
-                {/* İşlem Seçimi */}
+                {/* İşlem Butonları */}
                 {actionMode === 'idle' && !lastResult && (
                   <div className="grid grid-cols-2 gap-3">
                     <button
                       onClick={() => setActionMode('earn')}
-                      className="bg-emerald-600 text-white py-4 rounded-xl font-semibold hover:bg-emerald-700 transition flex flex-col items-center gap-2"
+                      className="bg-gradient-to-br from-emerald-500 to-emerald-600 text-white py-5 rounded-xl font-bold hover:from-emerald-600 hover:to-emerald-700 transition shadow-lg shadow-emerald-200 flex flex-col items-center gap-2"
                     >
-                      <TrendingUp className="w-6 h-6" />
+                      <TrendingUp className="w-7 h-7" />
                       Puan Yükle
                     </button>
                     <button
                       onClick={() => setActionMode('spend')}
-                      className="bg-orange-500 text-white py-4 rounded-xl font-semibold hover:bg-orange-600 transition flex flex-col items-center gap-2"
+                      className="bg-gradient-to-br from-orange-400 to-orange-500 text-white py-5 rounded-xl font-bold hover:from-orange-500 hover:to-orange-600 transition shadow-lg shadow-orange-200 flex flex-col items-center gap-2"
                     >
-                      <Wallet className="w-6 h-6" />
+                      <Wallet className="w-7 h-7" />
                       Puan Harca
                     </button>
                   </div>
                 )}
 
-                {/* Puan Yükleme Formu */}
+                {/* Puan Yükleme */}
                 {actionMode === 'earn' && (
-                  <div className="bg-white rounded-2xl shadow-md p-5 space-y-4">
-                    <h3 className="font-semibold text-gray-800 text-center">Puan Yükle</h3>
-
+                  <div className="bg-white rounded-2xl shadow-lg p-5 space-y-4 border border-gray-100">
+                    <h3 className="font-bold text-gray-800 text-center text-lg">💰 Puan Yükle</h3>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Alışveriş Tutarı (TL)
-                      </label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Alışveriş Tutarı (TL)</label>
                       <input
                         type="number"
                         inputMode="decimal"
                         value={amount}
                         onChange={(e) => setAmount(e.target.value)}
                         placeholder="Örn: 150"
-                        className="w-full px-4 py-3 border border-gray-300 rounded-xl text-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                        className="w-full px-4 py-3.5 border border-gray-200 rounded-xl text-lg font-semibold focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                       />
                     </div>
-
-                    {/* Ödeme Tipi Seçimi */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Ödeme Tipi
-                      </label>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Ödeme Tipi</label>
                       <div className="grid grid-cols-2 gap-2">
                         <button
                           onClick={() => setPaymentType('cash')}
                           className={`py-3 px-4 rounded-xl border-2 flex items-center justify-center gap-2 font-medium transition ${
                             paymentType === 'cash'
                               ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
-                              : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                              : 'border-gray-200 text-gray-600'
                           }`}
                         >
-                          <Banknote className="w-5 h-5" />
-                          Nakit
+                          <Banknote className="w-5 h-5" /> Nakit
                         </button>
                         <button
                           onClick={() => setPaymentType('card')}
                           className={`py-3 px-4 rounded-xl border-2 flex items-center justify-center gap-2 font-medium transition ${
                             paymentType === 'card'
                               ? 'border-blue-500 bg-blue-50 text-blue-700'
-                              : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                              : 'border-gray-200 text-gray-600'
                           }`}
                         >
-                          <CreditCard className="w-5 h-5" />
-                          Kart
+                          <CreditCard className="w-5 h-5" /> Kart
                         </button>
                       </div>
                       <p className="text-xs text-gray-500 mt-2 text-center">
-                        {paymentType === 'cash'
-                          ? `Nakit oran: %${cashPointsRate}`
-                          : `Kart oranı: %${cardPointsRate}`
-                        }
+                        %{paymentType === 'cash' ? cashPointsRate : cardPointsRate} oran
                         {amount && ` → ${(parseFloat(amount || '0') * (paymentType === 'cash' ? cashPointsRate : cardPointsRate) / 100).toFixed(2)} puan`}
                       </p>
                     </div>
-
                     <div className="flex gap-2">
                       <button
                         onClick={() => { setActionMode('idle'); setAmount(''); }}
@@ -636,7 +695,7 @@ export function MerchantPanel() {
                       <button
                         onClick={handlePuanYukle}
                         disabled={processing || !amount}
-                        className="flex-1 py-3 rounded-xl bg-emerald-600 text-white font-semibold hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                        className="flex-1 py-3 rounded-xl bg-emerald-600 text-white font-bold hover:bg-emerald-700 disabled:opacity-50 flex items-center justify-center gap-2"
                       >
                         {processing ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle className="w-5 h-5" />}
                         Yükle
@@ -645,20 +704,16 @@ export function MerchantPanel() {
                   </div>
                 )}
 
-                {/* Puan Harcama Formu */}
+                {/* Puan Harcama */}
                 {actionMode === 'spend' && (
-                  <div className="bg-white rounded-2xl shadow-md p-5 space-y-4">
-                    <h3 className="font-semibold text-gray-800 text-center">Puan Harca</h3>
-
-                    <div className="bg-orange-50 rounded-xl p-3 text-center">
-                      <p className="text-sm text-orange-700">Kullanılabilir bakiye:</p>
+                  <div className="bg-white rounded-2xl shadow-lg p-5 space-y-4 border border-gray-100">
+                    <h3 className="font-bold text-gray-800 text-center text-lg">🛒 Puan Harca</h3>
+                    <div className="bg-orange-50 rounded-xl p-3 text-center border border-orange-100">
+                      <p className="text-sm text-orange-700">Kullanılabilir:</p>
                       <p className="text-2xl font-bold text-orange-800">{customerInfo.store_balance.toFixed(2)} Puan</p>
                     </div>
-
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Harcanacak Puan
-                      </label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Harcanacak Puan</label>
                       <input
                         type="number"
                         inputMode="decimal"
@@ -666,13 +721,12 @@ export function MerchantPanel() {
                         onChange={(e) => setAmount(e.target.value)}
                         placeholder="Örn: 25"
                         max={customerInfo.store_balance}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-xl text-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                        className="w-full px-4 py-3.5 border border-gray-200 rounded-xl text-lg font-semibold focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                       />
                       {amount && parseFloat(amount) > customerInfo.store_balance && (
                         <p className="text-red-500 text-xs mt-1">Yetersiz bakiye!</p>
                       )}
                     </div>
-
                     <div className="flex gap-2">
                       <button
                         onClick={() => { setActionMode('idle'); setAmount(''); }}
@@ -683,7 +737,7 @@ export function MerchantPanel() {
                       <button
                         onClick={handlePuanHarca}
                         disabled={processing || !amount || parseFloat(amount) > customerInfo.store_balance}
-                        className="flex-1 py-3 rounded-xl bg-orange-500 text-white font-semibold hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                        className="flex-1 py-3 rounded-xl bg-orange-500 text-white font-bold hover:bg-orange-600 disabled:opacity-50 flex items-center justify-center gap-2"
                       >
                         {processing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Wallet className="w-5 h-5" />}
                         Harca
@@ -694,19 +748,19 @@ export function MerchantPanel() {
 
                 {/* İşlem Sonucu */}
                 {lastResult && (
-                  <div className="bg-white rounded-2xl shadow-md p-5 text-center">
+                  <div className="bg-white rounded-2xl shadow-lg p-5 text-center border border-gray-100">
                     <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-3">
                       <CheckCircle className="w-8 h-8 text-emerald-600" />
                     </div>
-                    <h3 className="font-semibold text-gray-800 mb-2">İşlem Başarılı!</h3>
+                    <h3 className="font-bold text-gray-800 mb-2 text-lg">İşlem Başarılı! ✅</h3>
                     <p className="text-gray-600 text-sm">{lastResult.message}</p>
-                    <div className="mt-4 bg-gray-50 rounded-xl p-3">
-                      <p className="text-sm text-gray-500">Güncel bakiye:</p>
-                      <p className="text-xl font-bold text-emerald-700">{lastResult.new_balance?.toFixed(2)} Puan</p>
+                    <div className="mt-4 bg-emerald-50 rounded-xl p-3 border border-emerald-100">
+                      <p className="text-sm text-emerald-700">Güncel bakiye:</p>
+                      <p className="text-xl font-bold text-emerald-800">{lastResult.new_balance?.toFixed(2)} Puan</p>
                     </div>
                     <button
                       onClick={resetCustomer}
-                      className="mt-4 w-full py-3 rounded-xl bg-emerald-600 text-white font-medium hover:bg-emerald-700"
+                      className="mt-4 w-full py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold hover:from-emerald-700 hover:to-teal-700 shadow-lg shadow-emerald-200"
                     >
                       Yeni İşlem
                     </button>
@@ -717,48 +771,113 @@ export function MerchantPanel() {
           </div>
         )}
 
-        {/* Geçmiş Tab */}
-        {activeTab === 'gecmis' && (
-          <div className="space-y-3">
-            <h2 className="text-lg font-semibold text-gray-800 mb-2">İşlem Geçmişi</h2>
+        {/* Müşteriler Tab */}
+        {activeTab === 'musteriler' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-bold text-gray-800">Müşterilerim</h2>
+              <span className="text-xs bg-emerald-100 text-emerald-700 px-2.5 py-1 rounded-full font-medium">
+                {myCustomers.length} müşteri
+              </span>
+            </div>
 
-            {transactions.length === 0 ? (
-              <div className="bg-white rounded-xl p-8 text-center shadow-sm">
-                <History className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                <p className="text-gray-500">Henüz işlem geçmişi yok</p>
+            {myCustomers.length === 0 ? (
+              <div className="bg-white rounded-2xl p-10 text-center shadow-sm border border-gray-100">
+                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Users className="w-8 h-8 text-gray-300" />
+                </div>
+                <p className="text-gray-600 font-medium">Henüz müşteriniz yok</p>
+                <p className="text-gray-400 text-sm mt-2">Müşteri QR kodunu okutarak ilk işlemi yapın</p>
               </div>
             ) : (
-              transactions.map((tx) => (
-                <div key={tx.id} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-9 h-9 rounded-full flex items-center justify-center ${
-                        tx.type === 'earn' ? 'bg-emerald-100' : 'bg-orange-100'
-                      }`}>
-                        {tx.type === 'earn' ? (
-                          <TrendingUp className="w-4 h-4 text-emerald-600" />
-                        ) : (
-                          <Wallet className="w-4 h-4 text-orange-600" />
-                        )}
+              <div className="space-y-3">
+                {myCustomers.map((cust) => (
+                  <div key={cust.id} className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 hover:shadow-md transition">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-11 h-11 bg-gradient-to-br from-blue-100 to-indigo-100 rounded-xl flex items-center justify-center">
+                          <Users className="w-5 h-5 text-blue-600" />
+                        </div>
+                        <div>
+                          <p className="font-semibold text-gray-900">{cust.customer_name}</p>
+                          <p className="text-xs text-gray-400 mt-0.5">
+                            {cust.last_transaction_at
+                              ? `Son: ${formatDate(cust.last_transaction_at)}`
+                              : 'Henüz işlem yok'}
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-medium text-gray-900 text-sm">{tx.customer_name}</p>
-                        <p className="text-xs text-gray-400">{formatDate(tx.created_at)}</p>
+                      <div className="text-right">
+                        <p className="text-lg font-bold text-emerald-700">{(cust.balance || 0).toFixed(2)}</p>
+                        <p className="text-xs text-gray-400">Bakiye</p>
                       </div>
                     </div>
-                    <div className="text-right">
-                      <p className={`font-bold text-sm ${
-                        tx.type === 'earn' ? 'text-emerald-600' : 'text-orange-600'
-                      }`}>
-                        {tx.type === 'earn' ? '+' : '-'}{tx.points.toFixed(2)} Puan
-                      </p>
-                      {tx.type === 'earn' && (
-                        <p className="text-xs text-gray-400">{formatCurrency(tx.amount)}</p>
-                      )}
+
+                    <div className="mt-3 pt-3 border-t border-gray-50 flex justify-between text-xs">
+                      <div className="flex items-center gap-1.5">
+                        <ArrowDownRight className="w-3 h-3 text-emerald-500" />
+                        <span className="text-gray-500">Yüklenen: <strong className="text-emerald-600">{(cust.total_earned || 0).toFixed(2)}</strong></span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <ArrowUpRight className="w-3 h-3 text-orange-500" />
+                        <span className="text-gray-500">Harcanan: <strong className="text-orange-600">{(cust.total_spent || 0).toFixed(2)}</strong></span>
+                      </div>
                     </div>
                   </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Geçmiş Tab */}
+        {activeTab === 'gecmis' && (
+          <div className="space-y-4">
+            <h2 className="text-lg font-bold text-gray-800">İşlem Geçmişi</h2>
+
+            {transactions.length === 0 ? (
+              <div className="bg-white rounded-2xl p-10 text-center shadow-sm border border-gray-100">
+                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <History className="w-8 h-8 text-gray-300" />
                 </div>
-              ))
+                <p className="text-gray-600 font-medium">Henüz işlem geçmişi yok</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {transactions.map((tx) => (
+                  <div key={tx.id} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                          tx.type === 'earn'
+                            ? 'bg-gradient-to-br from-emerald-100 to-emerald-200'
+                            : 'bg-gradient-to-br from-orange-100 to-orange-200'
+                        }`}>
+                          {tx.type === 'earn' ? (
+                            <TrendingUp className="w-5 h-5 text-emerald-600" />
+                          ) : (
+                            <Wallet className="w-5 h-5 text-orange-600" />
+                          )}
+                        </div>
+                        <div>
+                          <p className="font-semibold text-gray-900 text-sm">{tx.customer_name}</p>
+                          <p className="text-xs text-gray-400">{formatDate(tx.created_at)}</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className={`font-bold ${
+                          tx.type === 'earn' ? 'text-emerald-600' : 'text-orange-600'
+                        }`}>
+                          {tx.type === 'earn' ? '+' : '-'}{(tx.points || 0).toFixed(2)}
+                        </p>
+                        {tx.type === 'earn' && tx.amount > 0 && (
+                          <p className="text-xs text-gray-400">{formatCurrency(tx.amount)}</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         )}
@@ -766,9 +885,9 @@ export function MerchantPanel() {
         {/* Ayarlar Tab */}
         {activeTab === 'ayarlar' && (
           <div className="space-y-4">
-            <h2 className="text-lg font-semibold text-gray-800 mb-2">Puan Oranları</h2>
+            <h2 className="text-lg font-bold text-gray-800">Puan Oranları</h2>
 
-            <div className="bg-white rounded-2xl shadow-md p-5 space-y-4">
+            <div className="bg-white rounded-2xl shadow-lg p-5 space-y-4 border border-gray-100">
               <div>
                 <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
                   <Banknote className="w-4 h-4 text-emerald-600" />
@@ -780,9 +899,9 @@ export function MerchantPanel() {
                   onChange={(e) => setCashPointsRate(parseFloat(e.target.value) || 0)}
                   min={1}
                   max={25}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-emerald-500"
+                  className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-emerald-500"
                 />
-                <p className="text-xs text-gray-400 mt-1">Örn: 7 = %7 (100 TL alışverişte 7 puan)</p>
+                <p className="text-xs text-gray-400 mt-1">Örn: 7 = %7 (100 TL → 7 puan)</p>
               </div>
 
               <div>
@@ -796,23 +915,23 @@ export function MerchantPanel() {
                   onChange={(e) => setCardPointsRate(parseFloat(e.target.value) || 0)}
                   min={1}
                   max={25}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500"
                 />
-                <p className="text-xs text-gray-400 mt-1">Örn: 5 = %5 (100 TL alışverişte 5 puan)</p>
+                <p className="text-xs text-gray-400 mt-1">Örn: 5 = %5 (100 TL → 5 puan)</p>
               </div>
 
               <button
                 onClick={saveRates}
                 disabled={savingRate}
-                className="w-full py-3 rounded-xl bg-emerald-600 text-white font-semibold hover:bg-emerald-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                className="w-full py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold hover:from-emerald-700 hover:to-teal-700 disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-emerald-200"
               >
                 {savingRate ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle className="w-5 h-5" />}
                 Kaydet
               </button>
             </div>
 
-            <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
-              <p className="text-sm text-yellow-800">
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+              <p className="text-sm text-amber-800">
                 <strong>Not:</strong> Puan oranları 1-25 arasında olmalıdır. Nakit ödemeler genellikle daha yüksek oran alır.
               </p>
             </div>
