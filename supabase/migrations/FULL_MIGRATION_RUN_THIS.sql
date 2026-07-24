@@ -1,13 +1,13 @@
 -- ============================================================
--- ONKATI YENİ QR SİSTEMİ - TAM SQL MİGRASYONU
--- Çakışma-güvenli: DROP IF EXISTS + CREATE
--- Bu SQL'i Supabase Dashboard > SQL Editor'de çalıştırın
+-- ONKATI TAM MİGRASYON (TEK DOSYA - BUNU ÇALIŞTIRIN)
+-- Çakışma-güvenli: Her politika önce DROP edilir, sonra CREATE edilir
+-- Supabase Dashboard > SQL Editor'de çalıştırın
 -- ============================================================
 
 BEGIN;
 
 -- ============================================================
--- 1. store_customer_balances TABLOSU (İzole Cüzdan Yapısı)
+-- 1. TABLO: store_customer_balances (İzole Cüzdan)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS store_customer_balances (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -22,16 +22,64 @@ CREATE TABLE IF NOT EXISTS store_customer_balances (
   UNIQUE(customer_id, merchant_id)
 );
 
--- Indexes (IF NOT EXISTS)
 CREATE INDEX IF NOT EXISTS idx_scb_customer ON store_customer_balances(customer_id);
 CREATE INDEX IF NOT EXISTS idx_scb_merchant ON store_customer_balances(merchant_id);
 CREATE INDEX IF NOT EXISTS idx_scb_customer_merchant ON store_customer_balances(customer_id, merchant_id);
 
 -- ============================================================
--- 2. RLS POLİTİKALARI (Önce temizle, sonra oluştur)
+-- 2. RLS: customers tablosu
 -- ============================================================
+ALTER TABLE customers ENABLE ROW LEVEL SECURITY;
 
--- store_customer_balances RLS
+DROP POLICY IF EXISTS "merchants_limited_customer_view" ON customers;
+DROP POLICY IF EXISTS "customers_view_own" ON customers;
+DROP POLICY IF EXISTS "customers_select_own" ON customers;
+DROP POLICY IF EXISTS "Enable read access for all users" ON customers;
+DROP POLICY IF EXISTS "allow_read_all" ON customers;
+DROP POLICY IF EXISTS "customer_read_own_record" ON customers;
+DROP POLICY IF EXISTS "merchant_read_related_customers" ON customers;
+DROP POLICY IF EXISTS "public_read_customers" ON customers;
+DROP POLICY IF EXISTS "Users can view own customer profile" ON customers;
+DROP POLICY IF EXISTS "Customers can view own profile" ON customers;
+DROP POLICY IF EXISTS "customers_insert_own" ON customers;
+DROP POLICY IF EXISTS "customers_update_own" ON customers;
+
+CREATE POLICY "customer_read_own_record" ON customers
+  FOR SELECT USING (user_id = auth.uid());
+
+CREATE POLICY "merchant_read_related_customers" ON customers
+  FOR SELECT USING (
+    id IN (
+      SELECT scb.customer_id FROM store_customer_balances scb
+      JOIN merchants m ON m.id = scb.merchant_id
+      WHERE m.user_id = auth.uid()
+    )
+  );
+
+-- ============================================================
+-- 3. RLS: merchants tablosu
+-- ============================================================
+ALTER TABLE merchants ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "merchant_read_own" ON merchants;
+DROP POLICY IF EXISTS "merchants_select_own" ON merchants;
+DROP POLICY IF EXISTS "Enable read access for all users" ON merchants;
+DROP POLICY IF EXISTS "allow_read_all" ON merchants;
+DROP POLICY IF EXISTS "merchant_read_own_record" ON merchants;
+DROP POLICY IF EXISTS "customer_read_related_merchants" ON merchants;
+DROP POLICY IF EXISTS "public_read_merchant_info" ON merchants;
+DROP POLICY IF EXISTS "Users can view own merchant profile" ON merchants;
+DROP POLICY IF EXISTS "Merchants can view own profile" ON merchants;
+DROP POLICY IF EXISTS "Anyone can view merchants" ON merchants;
+DROP POLICY IF EXISTS "merchants_insert_own" ON merchants;
+DROP POLICY IF EXISTS "merchants_update_own" ON merchants;
+
+CREATE POLICY "public_read_merchant_info" ON merchants
+  FOR SELECT USING (true);
+
+-- ============================================================
+-- 4. RLS: store_customer_balances tablosu
+-- ============================================================
 ALTER TABLE store_customer_balances ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "customers_view_own_balances" ON store_customer_balances;
@@ -51,33 +99,8 @@ CREATE POLICY "merchants_view_store_balances" ON store_customer_balances
 CREATE POLICY "service_role_full_access" ON store_customer_balances
   FOR ALL USING (auth.role() = 'service_role');
 
--- customers tablosu RLS düzeltme
-ALTER TABLE customers ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "merchants_limited_customer_view" ON customers;
-DROP POLICY IF EXISTS "customers_view_own" ON customers;
-DROP POLICY IF EXISTS "customers_select_own" ON customers;
-DROP POLICY IF EXISTS "Enable read access for all users" ON customers;
-DROP POLICY IF EXISTS "allow_read_all" ON customers;
-DROP POLICY IF EXISTS "customer_read_own_record" ON customers;
-DROP POLICY IF EXISTS "merchant_read_related_customers" ON customers;
-DROP POLICY IF EXISTS "Users can view own customer profile" ON customers;
-DROP POLICY IF EXISTS "Customers can view own profile" ON customers;
-
-CREATE POLICY "customer_read_own_record" ON customers
-  FOR SELECT USING (user_id = auth.uid());
-
-CREATE POLICY "merchant_read_related_customers" ON customers
-  FOR SELECT USING (
-    id IN (
-      SELECT scb.customer_id FROM store_customer_balances scb
-      JOIN merchants m ON m.id = scb.merchant_id
-      WHERE m.user_id = auth.uid()
-    )
-  );
-
 -- ============================================================
--- 3. islem_puan_yukle RPC FONKSİYONU
+-- 5. RPC: islem_puan_yukle
 -- ============================================================
 DROP FUNCTION IF EXISTS islem_puan_yukle(UUID, NUMERIC, TEXT, NUMERIC, NUMERIC);
 
@@ -100,7 +123,6 @@ DECLARE
   v_new_balance NUMERIC;
   v_tx_id UUID;
 BEGIN
-  -- Esnafı bul (çağıran kullanıcı)
   SELECT id, store_id, store_name, is_active
   INTO v_merchant
   FROM merchants
@@ -115,7 +137,6 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'Magaza hesabi aktif degil');
   END IF;
 
-  -- Müşteriyi doğrula
   SELECT id, full_name, is_active
   INTO v_customer
   FROM customers
@@ -129,22 +150,18 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'Musteri hesabi askida');
   END IF;
 
-  -- Tutar kontrolü
   IF p_amount <= 0 THEN
     RETURN jsonb_build_object('success', false, 'error', 'Tutar sifirdan buyuk olmali');
   END IF;
 
-  -- Ödeme tipine göre oran belirle
   IF p_payment_type = 'card' THEN
     v_rate := p_card_rate;
   ELSE
     v_rate := p_cash_rate;
   END IF;
 
-  -- Puan hesapla
   v_points := ROUND(p_amount * v_rate / 100, 2);
 
-  -- store_customer_balances güncelle veya oluştur (UPSERT)
   INSERT INTO store_customer_balances (customer_id, merchant_id, balance, total_earned, last_transaction_at)
   VALUES (p_customer_id, v_merchant.id, v_points, v_points, NOW())
   ON CONFLICT (customer_id, merchant_id)
@@ -154,30 +171,14 @@ BEGIN
     last_transaction_at = NOW(),
     updated_at = NOW();
 
-  -- Yeni bakiyeyi al
   SELECT balance INTO v_new_balance
   FROM store_customer_balances
   WHERE customer_id = p_customer_id AND merchant_id = v_merchant.id;
 
-  -- Transaction kaydı oluştur
   INSERT INTO transactions (
-    idempotency_key,
-    customer_id,
-    merchant_id,
-    type,
-    amount,
-    points,
-    status,
-    created_at
+    idempotency_key, customer_id, merchant_id, type, amount, points, status, created_at
   ) VALUES (
-    gen_random_uuid()::text,
-    p_customer_id,
-    v_merchant.id,
-    'earn',
-    p_amount,
-    v_points,
-    'completed',
-    NOW()
+    gen_random_uuid()::text, p_customer_id, v_merchant.id, 'earn', p_amount, v_points, 'completed', NOW()
   )
   RETURNING id INTO v_tx_id;
 
@@ -196,7 +197,7 @@ END;
 $$;
 
 -- ============================================================
--- 4. islem_puan_harca RPC FONKSİYONU
+-- 6. RPC: islem_puan_harca
 -- ============================================================
 DROP FUNCTION IF EXISTS islem_puan_harca(UUID, NUMERIC);
 
@@ -215,7 +216,6 @@ DECLARE
   v_new_balance NUMERIC;
   v_tx_id UUID;
 BEGIN
-  -- Esnafı bul (çağıran kullanıcı)
   SELECT id, store_id, store_name, is_active
   INTO v_merchant
   FROM merchants
@@ -230,7 +230,6 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'Magaza hesabi aktif degil');
   END IF;
 
-  -- Müşteriyi doğrula
   SELECT id, full_name, is_active
   INTO v_customer
   FROM customers
@@ -244,12 +243,10 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'Musteri hesabi askida');
   END IF;
 
-  -- Harcama tutarı kontrolü
   IF p_points_to_spend <= 0 THEN
     RETURN jsonb_build_object('success', false, 'error', 'Harcama tutari sifirdan buyuk olmali');
   END IF;
 
-  -- Bu dükkandaki bakiyeyi kontrol et
   SELECT balance, total_spent
   INTO v_balance
   FROM store_customer_balances
@@ -264,7 +261,6 @@ BEGIN
     );
   END IF;
 
-  -- Bakiyeyi düş
   UPDATE store_customer_balances
   SET
     balance = balance - p_points_to_spend,
@@ -273,30 +269,14 @@ BEGIN
     updated_at = NOW()
   WHERE customer_id = p_customer_id AND merchant_id = v_merchant.id;
 
-  -- Yeni bakiyeyi al
   SELECT balance INTO v_new_balance
   FROM store_customer_balances
   WHERE customer_id = p_customer_id AND merchant_id = v_merchant.id;
 
-  -- Transaction kaydı oluştur
   INSERT INTO transactions (
-    idempotency_key,
-    customer_id,
-    merchant_id,
-    type,
-    amount,
-    points,
-    status,
-    created_at
+    idempotency_key, customer_id, merchant_id, type, amount, points, status, created_at
   ) VALUES (
-    gen_random_uuid()::text,
-    p_customer_id,
-    v_merchant.id,
-    'spend',
-    p_points_to_spend,
-    p_points_to_spend,
-    'completed',
-    NOW()
+    gen_random_uuid()::text, p_customer_id, v_merchant.id, 'spend', p_points_to_spend, p_points_to_spend, 'completed', NOW()
   )
   RETURNING id INTO v_tx_id;
 
@@ -313,7 +293,7 @@ END;
 $$;
 
 -- ============================================================
--- 5. musteri_bilgi_getir RPC (Esnaf QR okutunca müşteri bilgisi)
+-- 7. RPC: musteri_bilgi_getir
 -- ============================================================
 DROP FUNCTION IF EXISTS musteri_bilgi_getir(UUID);
 
@@ -329,7 +309,6 @@ DECLARE
   v_customer RECORD;
   v_balance NUMERIC;
 BEGIN
-  -- Esnafı bul
   SELECT id, store_name
   INTO v_merchant
   FROM merchants
@@ -340,7 +319,6 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'Esnaf hesabi bulunamadi');
   END IF;
 
-  -- Müşteriyi bul (telefon DÖNMEZ!)
   SELECT id, full_name, is_active
   INTO v_customer
   FROM customers
@@ -354,7 +332,6 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'Musteri hesabi askida');
   END IF;
 
-  -- Bu dükkandaki bakiyeyi getir
   SELECT COALESCE(balance, 0) INTO v_balance
   FROM store_customer_balances
   WHERE customer_id = p_customer_id AND merchant_id = v_merchant.id;
@@ -374,7 +351,7 @@ END;
 $$;
 
 -- ============================================================
--- 6. get_email_by_phone RPC (Telefon ile giriş için)
+-- 8. RPC: get_email_by_phone (telefon ile giriş)
 -- ============================================================
 DROP FUNCTION IF EXISTS get_email_by_phone(TEXT);
 
@@ -407,7 +384,7 @@ END;
 $$;
 
 -- ============================================================
--- 7. GRANT İZİNLERİ
+-- 9. GRANT İZİNLERİ
 -- ============================================================
 GRANT EXECUTE ON FUNCTION islem_puan_yukle(UUID, NUMERIC, TEXT, NUMERIC, NUMERIC) TO authenticated;
 GRANT EXECUTE ON FUNCTION islem_puan_harca(UUID, NUMERIC) TO authenticated;
@@ -415,7 +392,6 @@ GRANT EXECUTE ON FUNCTION musteri_bilgi_getir(UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION get_email_by_phone(TEXT) TO anon;
 GRANT EXECUTE ON FUNCTION get_email_by_phone(TEXT) TO authenticated;
 
--- store_customer_balances tablosuna erişim
 GRANT SELECT ON store_customer_balances TO authenticated;
 GRANT INSERT, UPDATE ON store_customer_balances TO service_role;
 
