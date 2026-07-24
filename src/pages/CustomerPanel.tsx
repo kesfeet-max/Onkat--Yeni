@@ -9,6 +9,7 @@ import {
   LogOut,
   Store,
   QrCode,
+  AlertCircle,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -38,7 +39,7 @@ interface TransactionRecord {
   store_name?: string;
 }
 
-interface Notification {
+interface NotificationItem {
   id: string;
   type: 'earn' | 'spend';
   store_name: string;
@@ -52,12 +53,12 @@ export function CustomerPanel() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<TabType>('qr');
   const [loading, setLoading] = useState(true);
+  const [pageError, setPageError] = useState<string | null>(null);
   const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
   const [storeBalances, setStoreBalances] = useState<StoreBalance[]>([]);
   const [transactions, setTransactions] = useState<TransactionRecord[]>([]);
-  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [showNotification, setShowNotification] = useState(false);
-  const [latestNotification, setLatestNotification] = useState<Notification | null>(null);
+  const [latestNotification, setLatestNotification] = useState<NotificationItem | null>(null);
 
   const customer = profile as any;
   const initializedRef = useRef(false);
@@ -67,17 +68,39 @@ export function CustomerPanel() {
       navigate('/giris');
       return;
     }
+    // Profil henüz yüklenmediyse bekle (loading durumunda kalır)
     if (!customer?.id) {
-      setLoading(false);
-      return;
+      // Ama sonsuz beklemeyi önlemek için 3 saniye timeout
+      const timeout = setTimeout(() => {
+        setLoading(false);
+        if (!customer?.id) {
+          setPageError('Müşteri profili yüklenemedi. Lütfen sayfayı yenileyin veya tekrar giriş yapın.');
+        }
+      }, 3000);
+      return () => clearTimeout(timeout);
     }
     if (initializedRef.current) return;
     initializedRef.current = true;
 
-    generateCustomerQR();
-    fetchStoreBalances();
-    fetchTransactions();
+    loadData();
   }, [user, customer?.id, navigate]);
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      setPageError(null);
+      await Promise.all([
+        generateCustomerQR(),
+        fetchStoreBalances(),
+        fetchTransactions(),
+      ]);
+    } catch (err) {
+      console.error('CustomerPanel loadData error:', err);
+      setPageError('Veriler yüklenirken bir hata oluştu. Lütfen tekrar deneyin.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Supabase Realtime: puan değişikliklerini dinle
   useEffect(() => {
@@ -93,7 +116,7 @@ export function CustomerPanel() {
           table: 'store_customer_balances',
           filter: `customer_id=eq.${customer.id}`,
         },
-        (_payload: any) => {
+        () => {
           // Bakiye değiştiğinde yenile
           fetchStoreBalances();
           fetchTransactions();
@@ -120,40 +143,43 @@ export function CustomerPanel() {
   }, [customer?.id]);
 
   const handleNewTransaction = async (tx: any) => {
-    // Mağaza adını bul
-    const { data: merchantData } = await supabase
-      .from('merchants')
-      .select('store_name')
-      .eq('id', tx.merchant_id)
-      .single();
+    try {
+      // Mağaza adını bul
+      const { data: merchantData } = await supabase
+        .from('merchants')
+        .select('store_name')
+        .eq('id', tx.merchant_id)
+        .single();
 
-    // Yeni bakiyeyi al
-    const { data: balanceData } = await supabase
-      .from('store_customer_balances')
-      .select('balance')
-      .eq('customer_id', tx.customer_id)
-      .eq('merchant_id', tx.merchant_id)
-      .single();
+      // Yeni bakiyeyi al
+      const { data: balanceData } = await supabase
+        .from('store_customer_balances')
+        .select('balance')
+        .eq('customer_id', tx.customer_id)
+        .eq('merchant_id', tx.merchant_id)
+        .single();
 
-    const notification: Notification = {
-      id: tx.id,
-      type: tx.type,
-      store_name: merchantData?.store_name || 'Bilinmeyen Mağaza',
-      points: tx.points,
-      new_balance: balanceData?.balance || 0,
-      timestamp: tx.created_at,
-    };
+      const notification: NotificationItem = {
+        id: tx.id,
+        type: tx.type,
+        store_name: merchantData?.store_name || 'Bilinmeyen Mağaza',
+        points: tx.points || 0,
+        new_balance: balanceData?.balance || 0,
+        timestamp: tx.created_at,
+      };
 
-    setLatestNotification(notification);
-    setShowNotification(true);
-    setNotifications(prev => [notification, ...prev]);
+      setLatestNotification(notification);
+      setShowNotification(true);
 
-    // 8 saniye sonra bildirimi kapat
-    setTimeout(() => setShowNotification(false), 8000);
+      // 8 saniye sonra bildirimi kapat
+      setTimeout(() => setShowNotification(false), 8000);
 
-    // Verileri yenile
-    fetchStoreBalances();
-    fetchTransactions();
+      // Verileri yenile
+      fetchStoreBalances();
+      fetchTransactions();
+    } catch (err) {
+      console.error('handleNewTransaction error:', err);
+    }
   };
 
   const generateCustomerQR = async () => {
@@ -163,7 +189,7 @@ export function CustomerPanel() {
       const qrData = JSON.stringify({
         type: 'customer_qr',
         customer_id: customer.id,
-        name: customer.full_name,
+        name: customer.full_name || 'Müşteri',
       });
 
       const url = await QRCode.toDataURL(qrData, {
@@ -191,7 +217,9 @@ export function CustomerPanel() {
         .order('last_transaction_at', { ascending: false });
 
       if (error) {
-        console.error('Balance fetch error:', error);
+        console.error('Balance fetch error:', error.message);
+        // RLS hatası durumunda çökmesini engelle
+        setStoreBalances([]);
         return;
       }
 
@@ -205,6 +233,9 @@ export function CustomerPanel() {
 
         const enriched = balances.map((b: any) => ({
           ...b,
+          balance: b.balance || 0,
+          total_earned: b.total_earned || 0,
+          total_spent: b.total_spent || 0,
           store_name: merchants?.find((m: any) => m.id === b.merchant_id)?.store_name || 'Bilinmeyen',
         }));
 
@@ -214,8 +245,7 @@ export function CustomerPanel() {
       }
     } catch (err) {
       console.error('Error fetching balances:', err);
-    } finally {
-      setLoading(false);
+      setStoreBalances([]);
     }
   }, [customer?.id]);
 
@@ -232,7 +262,8 @@ export function CustomerPanel() {
         .limit(50);
 
       if (error) {
-        console.error('Transaction fetch error:', error);
+        console.error('Transaction fetch error:', error.message);
+        setTransactions([]);
         return;
       }
 
@@ -245,6 +276,8 @@ export function CustomerPanel() {
 
         const enriched = txData.map((t: any) => ({
           ...t,
+          amount: t.amount || 0,
+          points: t.points || 0,
           store_name: merchants?.find((m: any) => m.id === t.merchant_id)?.store_name || 'Bilinmeyen',
         }));
 
@@ -254,15 +287,52 @@ export function CustomerPanel() {
       }
     } catch (err) {
       console.error('Error fetching transactions:', err);
+      setTransactions([]);
     }
   }, [customer?.id]);
 
   const totalBalance = storeBalances.reduce((sum, b) => sum + (b.balance || 0), 0);
 
+  // Loading durumu
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+        <div className="text-center">
+          <Loader2 className="w-8 h-8 animate-spin text-emerald-600 mx-auto" />
+          <p className="mt-3 text-gray-500 text-sm">Yükleniyor...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Hata durumu
+  if (pageError) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-xl shadow-md p-6 max-w-sm w-full text-center">
+          <AlertCircle className="w-12 h-12 text-orange-500 mx-auto mb-3" />
+          <h2 className="text-lg font-semibold text-gray-800 mb-2">Bir Sorun Oluştu</h2>
+          <p className="text-gray-600 text-sm mb-4">{pageError}</p>
+          <div className="space-y-2">
+            <button
+              onClick={() => {
+                initializedRef.current = false;
+                setPageError(null);
+                setLoading(true);
+                loadData();
+              }}
+              className="w-full py-2 px-4 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition text-sm font-medium"
+            >
+              Tekrar Dene
+            </button>
+            <button
+              onClick={signOut}
+              className="w-full py-2 px-4 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition text-sm font-medium"
+            >
+              Çıkış Yap
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
@@ -388,8 +458,9 @@ export function CustomerPanel() {
                   </p>
                 </div>
               ) : (
-                <div className="flex items-center justify-center h-56">
-                  <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+                <div className="flex flex-col items-center justify-center h-56">
+                  <AlertCircle className="w-8 h-8 text-gray-300 mb-2" />
+                  <p className="text-gray-400 text-sm">QR kodu oluşturulamadı</p>
                 </div>
               )}
             </div>

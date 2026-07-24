@@ -30,33 +30,76 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     fetchingRef.current = true;
 
     try {
-      // Müşteri profili — user_id ile kendi kaydını çeker (RLS uyumlu)
+      // Önce müşteri profili dene — sadece kesin var olan kolonları seç
+      // RLS hatası olursa error döner, data null olur
       const { data: customerData, error: custErr } = await supabase
         .from('customers')
-        .select('id, user_id, full_name, email, phone, points_balance, is_active, created_at')
+        .select('id, user_id, full_name, phone, is_active, created_at')
         .eq('user_id', userId)
         .maybeSingle();
 
-      if (customerData && !custErr) {
+      if (!custErr && customerData) {
         setUserRole('customer');
-        return customerData as CustomerProfile;
+        // Eksik alanları güvenli default'larla doldur
+        const safeCustomer: CustomerProfile = {
+          id: customerData.id,
+          user_id: customerData.user_id,
+          full_name: customerData.full_name || 'Müşteri',
+          phone: customerData.phone || '',
+          email: '',
+          points_balance: 0,
+          device_id: '',
+          is_active: customerData.is_active ?? true,
+          created_at: customerData.created_at || '',
+          updated_at: '',
+        };
+        return safeCustomer;
       }
 
-      // Esnaf profili
+      // Müşteri bulunamadı veya hata aldı — esnaf dene
       const { data: merchantData, error: merchErr } = await supabase
         .from('merchants')
-        .select('id, user_id, store_id, store_name, full_name, email, phone, city, district, sector, is_active, points_rate, created_at')
+        .select('id, user_id, store_id, store_name, full_name, phone, city, district, sector, is_active, created_at')
         .eq('user_id', userId)
         .maybeSingle();
 
-      if (merchantData && !merchErr) {
+      if (!merchErr && merchantData) {
         setUserRole('merchant');
-        return merchantData as MerchantProfile;
+        const safeMerchant: MerchantProfile = {
+          id: merchantData.id,
+          user_id: merchantData.user_id,
+          store_id: merchantData.store_id || 0,
+          store_name: merchantData.store_name || '',
+          full_name: merchantData.full_name || 'Esnaf',
+          phone: merchantData.phone || '',
+          city: merchantData.city || '',
+          district: merchantData.district || '',
+          sector: merchantData.sector || '',
+          latitude: 0,
+          longitude: 0,
+          total_revenue: 0,
+          total_points_distributed: 0,
+          total_customers: 0,
+          is_active: merchantData.is_active ?? true,
+          created_at: merchantData.created_at || '',
+          updated_at: '',
+        };
+        return safeMerchant;
       }
 
+      // Her iki tablo da sonuç vermedi
+      // RLS hatası mı yoksa gerçekten kayıt yok mu logla
+      if (custErr) {
+        console.warn('Customer profile fetch RLS/error:', custErr.message);
+      }
+      if (merchErr) {
+        console.warn('Merchant profile fetch RLS/error:', merchErr.message);
+      }
+
+      // Kullanıcı auth var ama profil yok — user_metadata'dan role tahmin et
       return null;
     } catch (err) {
-      console.error('Profile fetch error:', err);
+      console.error('Profile fetch unexpected error:', err);
       return null;
     } finally {
       fetchingRef.current = false;
@@ -89,11 +132,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setUser(authUser);
 
           const userProfile = await fetchProfile(session.user.id);
-          if (mounted) setProfile(userProfile);
+          if (mounted) {
+            setProfile(userProfile);
+            // Profil bulunamadıysa ama user_metadata'da role varsa onu kullan
+            if (!userProfile && session.user.user_metadata?.role) {
+              setUserRole(session.user.user_metadata.role as UserRole);
+            }
+          }
         }
       } catch (err) {
         console.error('Auth initialization error:', err);
-        if (mounted) setError('Kimlik dogrulama hatasi');
+        if (mounted) setError('Kimlik doğrulama hatası');
       } finally {
         if (mounted) setLoading(false);
       }
@@ -117,7 +166,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         };
         setUser(authUser);
         fetchProfile(session.user.id).then((userProfile) => {
-          if (mounted) setProfile(userProfile);
+          if (mounted) {
+            setProfile(userProfile);
+            if (!userProfile && session.user.user_metadata?.role) {
+              setUserRole(session.user.user_metadata.role as UserRole);
+            }
+          }
         });
       }
     });
@@ -137,14 +191,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const cleanedPhone = phone.replace(/\D/g, '');
 
       // RPC ile email bul (RLS bypass - SECURITY DEFINER)
-      const { data: rpcResult, error: rpcError } = await supabase.rpc('get_email_by_phone', {
-        p_phone: cleanedPhone,
-      });
-
       let email: string | null = null;
+      try {
+        const { data: rpcResult, error: rpcError } = await supabase.rpc('get_email_by_phone', {
+          p_phone: cleanedPhone,
+        });
 
-      if (!rpcError && rpcResult?.success) {
-        email = rpcResult.email;
+        if (!rpcError && rpcResult?.success) {
+          email = rpcResult.email;
+        }
+      } catch (rpcErr) {
+        // RPC mevcut değilse veya hata verirse sessizce devam et
+        console.warn('get_email_by_phone RPC failed, using fallback:', rpcErr);
       }
 
       // Fallback: eski format
@@ -173,11 +231,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         const userProfile = await fetchProfile(data.user.id);
         setProfile(userProfile);
+
+        // Profil bulunamadıysa user_metadata'dan role al
+        if (!userProfile && data.user.user_metadata?.role) {
+          setUserRole(data.user.user_metadata.role as UserRole);
+        }
       }
 
       setLoading(false);
       return {};
     } catch (err) {
+      console.error('signInWithPhone error:', err);
       setLoading(false);
       return { error: 'Giriş sırasında bir hata oluştu' };
     }
@@ -209,11 +273,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         const userProfile = await fetchProfile(data.user.id);
         setProfile(userProfile);
+
+        if (!userProfile && data.user.user_metadata?.role) {
+          setUserRole(data.user.user_metadata.role as UserRole);
+        }
       }
 
       setLoading(false);
       return {};
     } catch (err) {
+      console.error('signInWithEmail error:', err);
       setLoading(false);
       return { error: 'Giriş sırasında bir hata oluştu' };
     }

@@ -11,12 +11,13 @@ export interface CustomerProfile {
   id: string;
   user_id: string;
   phone: string;
+  email?: string;
   full_name: string;
   points_balance: number;
-  device_id: string;
+  device_id?: string;
   is_active: boolean;
   created_at: string;
-  updated_at: string;
+  updated_at?: string;
 }
 
 export interface MerchantProfile {
