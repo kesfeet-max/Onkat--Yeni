@@ -20,9 +20,7 @@ export function formatDate(dateString: string): string {
   }).format(new Date(dateString));
 }
 
-export function calculatePointsFromAmount(amount: number): number {
-  return Math.floor(amount * 0.07);
-}
+
 
 export function getDeviceId(): string {
   const stored = localStorage.getItem('onkati_device_id');
