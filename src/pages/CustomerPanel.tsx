@@ -1,16 +1,14 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Wallet,
   History,
-  AlertCircle,
   CheckCircle,
   X,
   Loader2,
   LogOut,
   Store,
   QrCode,
-  Bell,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -62,16 +60,24 @@ export function CustomerPanel() {
   const [latestNotification, setLatestNotification] = useState<Notification | null>(null);
 
   const customer = profile as any;
+  const initializedRef = useRef(false);
 
   useEffect(() => {
     if (!user) {
       navigate('/giris');
       return;
     }
+    if (!customer?.id) {
+      setLoading(false);
+      return;
+    }
+    if (initializedRef.current) return;
+    initializedRef.current = true;
+
     generateCustomerQR();
     fetchStoreBalances();
     fetchTransactions();
-  }, [user, navigate]);
+  }, [user, customer?.id, navigate]);
 
   // Supabase Realtime: puan değişikliklerini dinle
   useEffect(() => {

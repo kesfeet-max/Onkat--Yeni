@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import type { User, CustomerProfile, MerchantProfile, UserRole } from '../types';
 
@@ -22,31 +22,45 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [userRole, setUserRole] = useState<UserRole | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const fetchingRef = useRef(false);
 
   const fetchProfile = useCallback(async (userId: string): Promise<CustomerProfile | MerchantProfile | null> => {
-    const { data: customerData } = await supabase
-      .from('customers')
-      .select('*')
-      .eq('user_id', userId)
-      .maybeSingle();
+    // Sonsuz döngü koruması
+    if (fetchingRef.current) return null;
+    fetchingRef.current = true;
 
-    if (customerData) {
-      setUserRole('customer');
-      return customerData as CustomerProfile;
+    try {
+      // Müşteri profili — user_id ile kendi kaydını çeker (RLS uyumlu)
+      const { data: customerData, error: custErr } = await supabase
+        .from('customers')
+        .select('id, user_id, full_name, email, phone, points_balance, is_active, created_at')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (customerData && !custErr) {
+        setUserRole('customer');
+        return customerData as CustomerProfile;
+      }
+
+      // Esnaf profili
+      const { data: merchantData, error: merchErr } = await supabase
+        .from('merchants')
+        .select('id, user_id, store_id, store_name, full_name, email, phone, city, district, sector, is_active, points_rate, created_at')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (merchantData && !merchErr) {
+        setUserRole('merchant');
+        return merchantData as MerchantProfile;
+      }
+
+      return null;
+    } catch (err) {
+      console.error('Profile fetch error:', err);
+      return null;
+    } finally {
+      fetchingRef.current = false;
     }
-
-    const { data: merchantData } = await supabase
-      .from('merchants')
-      .select('*')
-      .eq('user_id', userId)
-      .maybeSingle();
-
-    if (merchantData) {
-      setUserRole('merchant');
-      return merchantData as MerchantProfile;
-    }
-
-    return null;
   }, []);
 
   const signOut = useCallback(async () => {
@@ -59,11 +73,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    let mounted = true;
+
     const initializeAuth = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
 
-        if (session?.user) {
+        if (session?.user && mounted) {
           const authUser: User = {
             id: session.user.id,
             email: session.user.email,
@@ -73,24 +89,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setUser(authUser);
 
           const userProfile = await fetchProfile(session.user.id);
-          setProfile(userProfile);
+          if (mounted) setProfile(userProfile);
         }
       } catch (err) {
         console.error('Auth initialization error:', err);
-        setError('Kimlik dogrulama hatasi');
+        if (mounted) setError('Kimlik dogrulama hatasi');
       } finally {
-        setLoading(false);
+        if (mounted) setLoading(false);
       }
     };
 
     initializeAuth();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!mounted) return;
+
       if (event === 'SIGNED_OUT') {
         setUser(null);
         setProfile(null);
         setUserRole(null);
-      } else if (session?.user) {
+      } else if (event === 'SIGNED_IN' && session?.user) {
         const authUser: User = {
           id: session.user.id,
           email: session.user.email,
@@ -98,14 +116,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           role: session.user.user_metadata?.role,
         };
         setUser(authUser);
-        (async () => {
-          const userProfile = await fetchProfile(session.user.id);
-          setProfile(userProfile);
-        })();
+        fetchProfile(session.user.id).then((userProfile) => {
+          if (mounted) setProfile(userProfile);
+        });
       }
     });
 
     return () => {
+      mounted = false;
       subscription.unsubscribe();
     };
   }, [fetchProfile]);
@@ -115,29 +133,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(true);
 
     try {
-      // Clean phone number
+      // Telefon numarasını temizle
       const cleanedPhone = phone.replace(/\D/g, '');
 
-      // Find user's email from customers table
-      const { data: customerData } = await supabase
-        .from('customers')
-        .select('email')
-        .eq('phone', cleanedPhone)
-        .maybeSingle();
+      // RPC ile email bul (RLS bypass - SECURITY DEFINER)
+      const { data: rpcResult, error: rpcError } = await supabase.rpc('get_email_by_phone', {
+        p_phone: cleanedPhone,
+      });
 
-      let email = customerData?.email;
+      let email: string | null = null;
 
-      // If not found in customers, check merchants
-      if (!email) {
-        const { data: merchantData } = await supabase
-          .from('merchants')
-          .select('email')
-          .eq('phone', cleanedPhone)
-          .maybeSingle();
-        email = merchantData?.email;
+      if (!rpcError && rpcResult?.success) {
+        email = rpcResult.email;
       }
 
-      // Fallback to old format for legacy accounts
+      // Fallback: eski format
       if (!email) {
         email = `${cleanedPhone}@onkati.local`;
       }
