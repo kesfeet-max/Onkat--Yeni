@@ -322,17 +322,61 @@ export function MerchantPanel() {
   }, []);
 
   const fetchMerchantSettings = async () => {
-    const savedCash = localStorage.getItem('onkati_cash_rate');
-    const savedCard = localStorage.getItem('onkati_card_rate');
-    if (savedCash) setCashPointsRate(parseFloat(savedCash));
-    if (savedCard) setCardPointsRate(parseFloat(savedCard));
+    if (!user) return;
+    try {
+      const { data, error } = await supabase
+        .from('merchants')
+        .select('cash_points_rate, card_points_rate')
+        .eq('user_id', user.id)
+        .single();
+
+      if (!error && data) {
+        if (data.cash_points_rate != null) setCashPointsRate(Number(data.cash_points_rate));
+        if (data.card_points_rate != null) setCardPointsRate(Number(data.card_points_rate));
+      } else {
+        // Fallback: localStorage'dan oku (migration henüz çalışmamışsa)
+        const savedCash = localStorage.getItem('onkati_cash_rate');
+        const savedCard = localStorage.getItem('onkati_card_rate');
+        if (savedCash) setCashPointsRate(parseFloat(savedCash));
+        if (savedCard) setCardPointsRate(parseFloat(savedCard));
+      }
+    } catch {
+      // Fallback: localStorage
+      const savedCash = localStorage.getItem('onkati_cash_rate');
+      const savedCard = localStorage.getItem('onkati_card_rate');
+      if (savedCash) setCashPointsRate(parseFloat(savedCash));
+      if (savedCard) setCardPointsRate(parseFloat(savedCard));
+    }
   };
 
   const saveRates = async () => {
+    if (!user) return;
     setSavingRate(true);
-    localStorage.setItem('onkati_cash_rate', cashPointsRate.toString());
-    localStorage.setItem('onkati_card_rate', cardPointsRate.toString());
-    setMessage({ type: 'success', text: 'Puan oranları kaydedildi!' });
+    try {
+      const { error } = await supabase
+        .from('merchants')
+        .update({
+          cash_points_rate: cashPointsRate,
+          card_points_rate: cardPointsRate,
+        })
+        .eq('user_id', user.id);
+
+      if (error) {
+        console.error('Puan oranı kaydetme hatası:', error);
+        setMessage({ type: 'error', text: 'Kaydetme başarısız: ' + error.message });
+        toast.error('Puan oranları kaydedilemedi!');
+      } else {
+        // Başarılı — localStorage'ı da güncelle (offline fallback)
+        localStorage.setItem('onkati_cash_rate', cashPointsRate.toString());
+        localStorage.setItem('onkati_card_rate', cardPointsRate.toString());
+        setMessage({ type: 'success', text: 'Puan oranları kaydedildi!' });
+        toast.success('Puan oranları başarıyla güncellendi!');
+      }
+    } catch (err: any) {
+      console.error('Puan oranı kaydetme hatası:', err);
+      setMessage({ type: 'error', text: 'Bağlantı hatası, tekrar deneyin.' });
+      toast.error('Bağlantı hatası!');
+    }
     setTimeout(() => setMessage(null), 3000);
     setSavingRate(false);
   };
@@ -830,10 +874,14 @@ export function MerchantPanel() {
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Alışveriş Tutarı (TL)</label>
                       <input
-                        type="number"
+                        type="text"
                         inputMode="decimal"
                         value={amount}
-                        onChange={(e) => setAmount(e.target.value)}
+                        onChange={(e) => {
+                          const val = e.target.value.replace(/[^0-9.,]/g, '').replace(',', '.');
+                          setAmount(val);
+                        }}
+                        onFocus={(e) => e.target.select()}
                         placeholder="Örn: 150"
                         className="w-full px-4 py-3.5 border border-gray-200 rounded-xl text-lg font-semibold focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                       />
@@ -897,12 +945,15 @@ export function MerchantPanel() {
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Harcanacak Puan</label>
                       <input
-                        type="number"
+                        type="text"
                         inputMode="decimal"
                         value={amount}
-                        onChange={(e) => setAmount(e.target.value)}
+                        onChange={(e) => {
+                          const val = e.target.value.replace(/[^0-9.,]/g, '').replace(',', '.');
+                          setAmount(val);
+                        }}
+                        onFocus={(e) => e.target.select()}
                         placeholder="Örn: 25"
-                        max={customerInfo.store_balance}
                         className="w-full px-4 py-3.5 border border-gray-200 rounded-xl text-lg font-semibold focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                       />
                       {amount && parseFloat(amount) > customerInfo.store_balance && (
@@ -1076,12 +1127,23 @@ export function MerchantPanel() {
                   Nakit Ödeme Puan Oranı (%)
                 </label>
                 <input
-                  type="number"
-                  value={cashPointsRate}
-                  onChange={(e) => setCashPointsRate(parseFloat(e.target.value) || 0)}
-                  min={1}
-                  max={25}
-                  className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-emerald-500"
+                  type="text"
+                  inputMode="decimal"
+                  value={cashPointsRate === 0 ? '' : String(cashPointsRate)}
+                  onChange={(e) => {
+                    const raw = e.target.value.replace(/[^0-9.,]/g, '').replace(',', '.');
+                    if (raw === '' || raw === '.') {
+                      setCashPointsRate(0);
+                      return;
+                    }
+                    const num = parseFloat(raw);
+                    if (!isNaN(num) && num <= 25) {
+                      setCashPointsRate(num);
+                    }
+                  }}
+                  onFocus={(e) => e.target.select()}
+                  placeholder="7"
+                  className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-emerald-500 text-lg"
                 />
                 <p className="text-xs text-gray-400 mt-1">Örn: 7 = %7 (100 TL → 7 puan)</p>
               </div>
@@ -1092,12 +1154,23 @@ export function MerchantPanel() {
                   Kart Ödeme Puan Oranı (%)
                 </label>
                 <input
-                  type="number"
-                  value={cardPointsRate}
-                  onChange={(e) => setCardPointsRate(parseFloat(e.target.value) || 0)}
-                  min={1}
-                  max={25}
-                  className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500"
+                  type="text"
+                  inputMode="decimal"
+                  value={cardPointsRate === 0 ? '' : String(cardPointsRate)}
+                  onChange={(e) => {
+                    const raw = e.target.value.replace(/[^0-9.,]/g, '').replace(',', '.');
+                    if (raw === '' || raw === '.') {
+                      setCardPointsRate(0);
+                      return;
+                    }
+                    const num = parseFloat(raw);
+                    if (!isNaN(num) && num <= 25) {
+                      setCardPointsRate(num);
+                    }
+                  }}
+                  onFocus={(e) => e.target.select()}
+                  placeholder="5"
+                  className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 text-lg"
                 />
                 <p className="text-xs text-gray-400 mt-1">Örn: 5 = %5 (100 TL → 5 puan)</p>
               </div>
