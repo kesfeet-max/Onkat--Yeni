@@ -7,11 +7,42 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Missing Supabase environment variables');
 }
 
+/**
+ * Enterprise Supabase Client
+ * - Connection pooling optimizasyonu (realtime kanal limiti)
+ * - Otomatik token yenileme
+ * - Oturum kalıcılığı
+ * - Global fetch timeout ile bağlantı kopması önleme
+ */
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false,
+    flowType: 'pkce',
+  },
+  realtime: {
+    params: {
+      eventsPerSecond: 10, // Rate limiting — sunucu yükünü azalt
+    },
+  },
+  global: {
+    headers: {
+      'x-client-info': 'onkati-enterprise/2.0',
+    },
+    fetch: (url, options = {}) => {
+      // Global timeout: 15 saniye — bağlantı takılmalarını önle
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+
+      return fetch(url, {
+        ...options,
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timeout));
+    },
+  },
+  db: {
+    schema: 'public',
   },
 });
 

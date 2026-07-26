@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './auth/AuthContext';
 import { Layout } from './components/Layout';
 import { RedirectProvider } from './components/RedirectHandler';
+import { ToastContainer } from './components/ToastContainer';
 import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
@@ -17,6 +18,7 @@ function App() {
     <BrowserRouter>
       <AuthProvider>
         <RedirectProvider>
+          <ToastContainer />
           <Routes>
             <Route element={<Layout />}>
               <Route path="/" element={<LandingPage />} />

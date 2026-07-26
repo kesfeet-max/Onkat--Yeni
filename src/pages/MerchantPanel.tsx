@@ -18,10 +18,15 @@ import {
   Store,
   ArrowDownRight,
   ArrowUpRight,
+  WifiOff,
+  RefreshCw,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { supabase } from '../lib/supabase';
 import { formatCurrency, formatDate } from '../lib/utils';
+import { QREngine } from '../lib/qr-engine';
+import { withRetry, resilientRpc, resilientQuery } from '../lib/retry';
+import { toast } from '../lib/toast';
 
 type MerchantTab = 'islem' | 'musteriler' | 'gecmis' | 'ayarlar';
 
@@ -65,10 +70,11 @@ export function MerchantPanel() {
   const [cardPointsRate, setCardPointsRate] = useState<number>(5);
   const [savingRate, setSavingRate] = useState(false);
 
-  // QR Scanner state
+  // QR Scanner state — Enterprise QR Engine
   const [showScanner, setShowScanner] = useState(false);
   const [scannerReady, setScannerReady] = useState(false);
-  const scannerRef = useRef<any>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const qrEngineRef = useRef<QREngine | null>(null);
   const scannerContainerRef = useRef<HTMLDivElement>(null);
 
   // İşlem state
@@ -131,58 +137,101 @@ export function MerchantPanel() {
     })));
   }, [myCustomers]);
 
-  const fetchTransactions = async () => {
+  const fetchTransactions = useCallback(async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
 
-      const { data: merchantData } = await supabase
-        .from('merchants')
-        .select('id')
-        .eq('user_id', session.user.id)
-        .single();
+      // Resilient query — ağ kopmasında otomatik yeniden dene
+      const { data: merchantData } = await resilientQuery(() =>
+        supabase
+          .from('merchants')
+          .select('id')
+          .eq('user_id', session.user.id)
+          .single()
+      );
 
       if (!merchantData) {
         setLoading(false);
         return;
       }
 
-      const { data: txData, error } = await supabase
-        .from('transactions')
-        .select('*')
-        .eq('merchant_id', merchantData.id)
-        .eq('status', 'completed')
-        .order('created_at', { ascending: false })
-        .limit(100);
+      const merchantId = (merchantData as any).id;
+
+      const { data: txData, error } = await resilientQuery(() =>
+        supabase
+          .from('transactions')
+          .select('*')
+          .eq('merchant_id', merchantId)
+          .eq('status', 'completed')
+          .order('created_at', { ascending: false })
+          .limit(100)
+      );
 
       if (!error && txData) {
-        // İsimleri sonradan eşleştireceğiz (enrichTransactions effect'inde)
-        setTransactions(txData.map((t: any) => ({
+        const txList = txData as any[];
+        
+        // Unique customer_id'leri çıkar ve her biri için isim çek
+        const uniqueCustomerIds = [...new Set(txList.map(t => t.customer_id).filter(Boolean))];
+        const customerNameMap: Record<string, string> = {};
+
+        // Paralel olarak müşteri isimlerini çek (musteri_bilgi_getir RPC)
+        await Promise.all(
+          uniqueCustomerIds.map(async (custId) => {
+            try {
+              const { data: info } = await supabase.rpc('musteri_bilgi_getir', {
+                p_customer_id: custId,
+              });
+              const r = info as any;
+              if (r?.success && r.customer_name) {
+                customerNameMap[custId] = r.customer_name;
+              }
+            } catch {
+              // Tek bir müşteri çekilemezse diğerlerini engelleme
+            }
+          })
+        );
+
+        setTransactions(txList.map((t: any) => ({
           ...t,
-          customer_name: 'Müşteri', // Geçici — enrichTransactions güncelleyecek
+          customer_name: customerNameMap[t.customer_id] || 'Bilinmeyen Müşteri',
         })));
       }
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        toast.networkError();
+      }
       console.error('Error fetching transactions:', err);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   const fetchMyCustomers = useCallback(async () => {
     try {
-      // RPC kullan — customers tablosuna doğrudan erişim yok (RLS döngüsünü önler)
-      const { data: result, error } = await supabase.rpc('esnaf_musteri_listesi');
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
 
-      if (error) {
-        console.warn('esnaf_musteri_listesi RPC error, falling back to direct query:', error.message);
-        // Fallback: RPC henüz deploy edilmemişse store_customer_balances'tan çek
-        await fetchMyCustomersFallback();
-        return;
-      }
+      // Önce merchant_id'yi al
+      const { data: merchantData } = await supabase
+        .from('merchants')
+        .select('id')
+        .eq('user_id', session.user.id)
+        .single();
+      if (!merchantData) return;
 
-      if (result?.success && result.customers) {
-        const customers = (result.customers as any[]).map((c: any) => ({
+      const merchantId = (merchantData as any).id;
+
+      // 1. RPC dene — store_customer_balances tablosundan
+      const { data: result, error } = await resilientRpc(supabase, 'esnaf_musteri_listesi', undefined, {
+        onRetry: () => {
+          toast.retry('Müşteri listesi yeniden yükleniyor...');
+        },
+      });
+
+      const r = result as any;
+      if (!error && r?.success && Array.isArray(r.customers) && r.customers.length > 0) {
+        const customers = r.customers.map((c: any) => ({
           id: c.id,
           customer_id: c.customer_id,
           balance: c.balance || 0,
@@ -192,55 +241,85 @@ export function MerchantPanel() {
           customer_name: c.customer_name || 'Müşteri',
         }));
         setMyCustomers(customers);
-      } else {
-        setMyCustomers([]);
+        return;
       }
-    } catch (err) {
+
+      // 2. RPC boş döndü veya hata verdi — transactions tablosundan distinct müşterileri çek
+      console.warn('RPC boş/hata, transactions tablosundan müşteri listesi oluşturuluyor...');
+      
+      const { data: txData } = await supabase
+        .from('transactions')
+        .select('customer_id, type, points, created_at')
+        .eq('merchant_id', merchantId)
+        .eq('status', 'completed')
+        .order('created_at', { ascending: false });
+
+      if (!txData || txData.length === 0) {
+        setMyCustomers([]);
+        return;
+      }
+
+      // Unique müşterileri ve bakiyelerini hesapla
+      const customerMap: Record<string, { 
+        customer_id: string; 
+        total_earned: number; 
+        total_spent: number; 
+        last_transaction_at: string;
+      }> = {};
+
+      for (const tx of txData as any[]) {
+        if (!tx.customer_id) continue;
+        if (!customerMap[tx.customer_id]) {
+          customerMap[tx.customer_id] = {
+            customer_id: tx.customer_id,
+            total_earned: 0,
+            total_spent: 0,
+            last_transaction_at: tx.created_at,
+          };
+        }
+        if (tx.type === 'earn') {
+          customerMap[tx.customer_id].total_earned += parseFloat(tx.points) || 0;
+        } else if (tx.type === 'spend') {
+          customerMap[tx.customer_id].total_spent += parseFloat(tx.points) || 0;
+        }
+      }
+
+      // Her müşteri için isim çek
+      const customerList = await Promise.all(
+        Object.values(customerMap).map(async (c) => {
+          let customerName = 'Müşteri';
+          try {
+            const { data: info } = await supabase.rpc('musteri_bilgi_getir', {
+              p_customer_id: c.customer_id,
+            });
+            const infoR = info as any;
+            if (infoR?.success && infoR.customer_name) {
+              customerName = infoR.customer_name;
+            }
+          } catch {
+            // İsim çekilemezse "Müşteri" kalır
+          }
+          return {
+            id: c.customer_id,
+            customer_id: c.customer_id,
+            balance: Math.round((c.total_earned - c.total_spent) * 100) / 100,
+            total_earned: Math.round(c.total_earned * 100) / 100,
+            total_spent: Math.round(c.total_spent * 100) / 100,
+            last_transaction_at: c.last_transaction_at,
+            customer_name: customerName,
+          };
+        })
+      );
+
+      setMyCustomers(customerList);
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        toast.networkError();
+      }
       console.error('Error fetching customers:', err);
       setMyCustomers([]);
     }
   }, []);
-
-  const fetchMyCustomersFallback = async () => {
-    try {
-      const merchantId = merchant?.id;
-      if (!merchantId) {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) return;
-        const { data: merchantData } = await supabase
-          .from('merchants')
-          .select('id')
-          .eq('user_id', session.user.id)
-          .single();
-        if (!merchantData) return;
-
-        const { data: balances } = await supabase
-          .from('store_customer_balances')
-          .select('*')
-          .eq('merchant_id', merchantData.id)
-          .order('last_transaction_at', { ascending: false });
-
-        setMyCustomers((balances || []).map((b: any) => ({
-          ...b,
-          customer_name: 'Müşteri',
-        })));
-      } else {
-        const { data: balances } = await supabase
-          .from('store_customer_balances')
-          .select('*')
-          .eq('merchant_id', merchantId)
-          .order('last_transaction_at', { ascending: false });
-
-        setMyCustomers((balances || []).map((b: any) => ({
-          ...b,
-          customer_name: 'Müşteri',
-        })));
-      }
-    } catch (err) {
-      console.error('Fallback customer fetch error:', err);
-      setMyCustomers([]);
-    }
-  };
 
   const fetchMerchantSettings = async () => {
     const savedCash = localStorage.getItem('onkati_cash_rate');
@@ -258,80 +337,133 @@ export function MerchantPanel() {
     setSavingRate(false);
   };
 
-  // QR Scanner
-  const startScanner = async () => {
+  // QR Scanner — Enterprise: Kamera milisaniyeler içinde açılır
+  const startScanner = useCallback(async () => {
+    // Önce UI'ı göster — kullanıcı anında feedback alsın
     setShowScanner(true);
     setScannerReady(false);
+    setCameraError(null);
 
-    const { default: Html5QrcodeScanner } = await import('html5-qrcode').then(m => ({ default: m.Html5QrcodeScanner }));
+    // Eski engine varsa temizle
+    if (qrEngineRef.current) {
+      await qrEngineRef.current.stop();
+      qrEngineRef.current = null;
+    }
 
-    setTimeout(() => {
-      if (scannerContainerRef.current) {
-        const scanner = new Html5QrcodeScanner(
-          'merchant-qr-reader',
-          { fps: 10, qrbox: { width: 250, height: 250 }, aspectRatio: 1 },
-          false
-        );
+    // Micro-delay: DOM element'in mount olmasını bekle (1 frame)
+    await new Promise(r => requestAnimationFrame(r));
 
-        scanner.render(
-          (decodedText: string) => {
-            handleQRScan(decodedText);
-            scanner.clear();
-            setShowScanner(false);
-          },
-          () => {}
-        );
-
-        scannerRef.current = scanner;
+    const engine = new QREngine({
+      elementId: 'merchant-qr-reader',
+      fps: 15,
+      qrboxSize: 250,
+      onScanSuccess: (decodedText: string) => {
+        // QR okundu — kamerayı hemen kapat, işlemi başlat
+        engine.stop();
+        setShowScanner(false);
+        setScannerReady(false);
+        handleQRScan(decodedText);
+      },
+      onCameraReady: () => {
         setScannerReady(true);
-      }
-    }, 300);
-  };
+      },
+      onCameraError: (error: string) => {
+        setCameraError(error);
+        setScannerReady(false);
+        toast.error('Kamera Hatası', error);
+      },
+    });
 
-  const stopScanner = () => {
-    if (scannerRef.current) {
-      try { scannerRef.current.clear(); } catch {}
-      scannerRef.current = null;
+    qrEngineRef.current = engine;
+
+    // Kamerayı doğrudan başlat — getUserMedia anında tetiklenir
+    await engine.start();
+  }, []);
+
+  const stopScanner = useCallback(async () => {
+    if (qrEngineRef.current) {
+      await qrEngineRef.current.stop();
+      qrEngineRef.current = null;
     }
     setShowScanner(false);
     setScannerReady(false);
-  };
+    setCameraError(null);
+  }, []);
+
+  // Cleanup: component unmount olduğunda kamerayı kapat
+  useEffect(() => {
+    return () => {
+      if (qrEngineRef.current) {
+        qrEngineRef.current.stop();
+        qrEngineRef.current = null;
+      }
+    };
+  }, []);
 
   const handleQRScan = async (data: string) => {
     try {
-      const parsed = JSON.parse(data);
+      // QR verisini parse et — stateless doğrulama (sunucuya gitmeden)
+      let parsed: any;
+      try {
+        parsed = JSON.parse(data);
+      } catch {
+        setMessage({ type: 'error', text: 'Geçersiz QR formatı. Lütfen Onkatı müşteri QR kodunu okutun.' });
+        return;
+      }
 
       if (parsed.type !== 'customer_qr' || !parsed.customer_id) {
         setMessage({ type: 'error', text: 'Geçersiz QR kodu. Lütfen müşteri QR kodunu okutun.' });
         return;
       }
 
-      const { data: result, error } = await supabase.rpc('musteri_bilgi_getir', {
+      // Timestamp kontrolü — 5 dakikadan eski QR'lar geçersiz (replay attack önleme)
+      if (parsed.ts) {
+        const qrAge = Date.now() - parsed.ts;
+        if (qrAge > 5 * 60 * 1000) {
+          setMessage({ type: 'error', text: 'QR kodun süresi dolmuş. Müşteriden yeni QR isteyin.' });
+          return;
+        }
+      }
+
+      // Müşteri bilgisini al — retry mekanizmalı
+      const { data: result, error } = await resilientRpc(supabase, 'musteri_bilgi_getir', {
         p_customer_id: parsed.customer_id,
+      }, {
+        onRetry: (attempt) => {
+          toast.retry('Yeniden deneniyor...', `Deneme ${attempt + 1}`);
+        },
       });
 
       if (error) {
         setMessage({ type: 'error', text: 'Müşteri bilgisi alınamadı: ' + error.message });
+        toast.error('Bağlantı Hatası', 'Müşteri bilgisi alınamadı');
         return;
       }
 
-      if (!result.success) {
-        setMessage({ type: 'error', text: result.error });
+      if (!result || !(result as any).success) {
+        setMessage({ type: 'error', text: (result as any)?.error || 'Müşteri bulunamadı' });
         return;
       }
 
+      const r = result as any;
       setCustomerInfo({
-        customer_id: result.customer_id,
-        customer_name: result.customer_name,
-        store_balance: result.store_balance,
-        store_name: result.store_name,
+        customer_id: r.customer_id,
+        customer_name: r.customer_name,
+        store_balance: r.store_balance,
+        store_name: r.store_name,
       });
       setActionMode('idle');
       setAmount('');
       setLastResult(null);
       setMessage(null);
-    } catch {
-      setMessage({ type: 'error', text: 'QR kodu okunamadı. Lütfen tekrar deneyin.' });
+      toast.success('Müşteri Tanındı', r.customer_name);
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        toast.networkError();
+        setMessage({ type: 'error', text: 'Bağlantı zaman aşımına uğradı. Tekrar deneyin.' });
+      } else {
+        setMessage({ type: 'error', text: 'QR kodu okunamadı. Lütfen tekrar deneyin.' });
+      }
     }
   };
 
@@ -347,32 +479,47 @@ export function MerchantPanel() {
     setMessage(null);
 
     try {
-      const { data: result, error } = await supabase.rpc('islem_puan_yukle', {
+      const { data: result, error } = await resilientRpc(supabase, 'islem_puan_yukle', {
         p_customer_id: customerInfo.customer_id,
         p_amount: numAmount,
         p_payment_type: paymentType,
         p_cash_rate: cashPointsRate,
         p_card_rate: cardPointsRate,
+      }, {
+        maxAttempts: 2, // Finansal işlem — max 2 deneme (idempotency key ile güvenli)
+        onRetry: (attempt) => {
+          toast.retry('İşlem yeniden deneniyor...', `Deneme ${attempt + 1}`);
+        },
       });
 
       if (error) {
         setMessage({ type: 'error', text: 'İşlem hatası: ' + error.message });
+        toast.error('İşlem Başarısız', error.message);
         return;
       }
-      if (!result.success) {
-        setMessage({ type: 'error', text: result.error });
+      
+      const r = result as any;
+      if (!r?.success) {
+        setMessage({ type: 'error', text: r?.error || 'İşlem başarısız' });
         return;
       }
 
-      setLastResult(result);
-      setMessage({ type: 'success', text: `${numAmount} TL → ${result.points} puan yüklendi!` });
-      setCustomerInfo(prev => prev ? { ...prev, store_balance: result.new_balance } : null);
+      setLastResult(r);
+      setMessage({ type: 'success', text: `${numAmount} TL → ${r.points} puan yüklendi!` });
+      toast.success('Puan Yüklendi!', `${r.points} puan başarıyla eklendi`);
+      setCustomerInfo(prev => prev ? { ...prev, store_balance: r.new_balance } : null);
       setAmount('');
       setActionMode('idle');
       fetchTransactions();
       fetchMyCustomers();
-    } catch {
-      setMessage({ type: 'error', text: 'Beklenmeyen bir hata oluştu' });
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        toast.networkError();
+        setMessage({ type: 'error', text: 'Bağlantı zaman aşımına uğradı. Tekrar deneyin.' });
+      } else {
+        setMessage({ type: 'error', text: 'Beklenmeyen bir hata oluştu. Lütfen tekrar deneyin.' });
+        toast.error('Hata', 'İşlem tamamlanamadı');
+      }
     } finally {
       setProcessing(false);
     }
@@ -390,29 +537,44 @@ export function MerchantPanel() {
     setMessage(null);
 
     try {
-      const { data: result, error } = await supabase.rpc('islem_puan_harca', {
+      const { data: result, error } = await resilientRpc(supabase, 'islem_puan_harca', {
         p_customer_id: customerInfo.customer_id,
         p_points_to_spend: numPoints,
+      }, {
+        maxAttempts: 2,
+        onRetry: (attempt) => {
+          toast.retry('İşlem yeniden deneniyor...', `Deneme ${attempt + 1}`);
+        },
       });
 
       if (error) {
         setMessage({ type: 'error', text: 'İşlem hatası: ' + error.message });
-        return;
-      }
-      if (!result.success) {
-        setMessage({ type: 'error', text: result.error });
+        toast.error('İşlem Başarısız', error.message);
         return;
       }
 
-      setLastResult(result);
-      setMessage({ type: 'success', text: `${numPoints} puan harcandı. Kalan: ${result.new_balance}` });
-      setCustomerInfo(prev => prev ? { ...prev, store_balance: result.new_balance } : null);
+      const r = result as any;
+      if (!r?.success) {
+        setMessage({ type: 'error', text: r?.error || 'İşlem başarısız' });
+        return;
+      }
+
+      setLastResult(r);
+      setMessage({ type: 'success', text: `${numPoints} puan harcandı. Kalan: ${r.new_balance}` });
+      toast.success('Puan Harcandı!', `${numPoints} puan kullanıldı`);
+      setCustomerInfo(prev => prev ? { ...prev, store_balance: r.new_balance } : null);
       setAmount('');
       setActionMode('idle');
       fetchTransactions();
       fetchMyCustomers();
-    } catch {
-      setMessage({ type: 'error', text: 'Beklenmeyen bir hata oluştu' });
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        toast.networkError();
+        setMessage({ type: 'error', text: 'Bağlantı zaman aşımına uğradı. Tekrar deneyin.' });
+      } else {
+        setMessage({ type: 'error', text: 'Beklenmeyen bir hata oluştu. Lütfen tekrar deneyin.' });
+        toast.error('Hata', 'İşlem tamamlanamadı');
+      }
     } finally {
       setProcessing(false);
     }
@@ -582,11 +744,33 @@ export function MerchantPanel() {
                         <X className="w-5 h-5 text-gray-600" />
                       </button>
                     </div>
-                    <div id="merchant-qr-reader" ref={scannerContainerRef} className="rounded-xl overflow-hidden" />
-                    {!scannerReady && (
-                      <div className="flex items-center justify-center py-4">
-                        <Loader2 className="w-6 h-6 animate-spin text-emerald-600" />
-                        <span className="ml-2 text-sm text-gray-500">Kamera açılıyor...</span>
+                    <div id="merchant-qr-reader" ref={scannerContainerRef} className="rounded-xl overflow-hidden min-h-[280px] bg-black" />
+                    {!scannerReady && !cameraError && (
+                      <div className="flex items-center justify-center py-3">
+                        <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse mr-2" />
+                        <span className="text-sm text-gray-500">Kamera başlatılıyor...</span>
+                      </div>
+                    )}
+                    {cameraError && (
+                      <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-xl">
+                        <div className="flex items-center gap-2 mb-2">
+                          <AlertCircle className="w-4 h-4 text-red-500" />
+                          <span className="text-sm font-medium text-red-700">Kamera Hatası</span>
+                        </div>
+                        <p className="text-xs text-red-600 mb-2">{cameraError}</p>
+                        <button
+                          onClick={startScanner}
+                          className="w-full py-2 bg-red-100 text-red-700 rounded-lg text-sm font-medium hover:bg-red-200 flex items-center justify-center gap-1"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5" />
+                          Tekrar Dene
+                        </button>
+                      </div>
+                    )}
+                    {scannerReady && (
+                      <div className="flex items-center justify-center py-2">
+                        <div className="w-2 h-2 bg-green-500 rounded-full mr-2" />
+                        <span className="text-xs text-green-600 font-medium">Kamera aktif — QR kodu gösterin</span>
                       </div>
                     )}
                   </div>

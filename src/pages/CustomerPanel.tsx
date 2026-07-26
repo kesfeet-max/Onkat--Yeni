@@ -171,25 +171,38 @@ export function CustomerPanel() {
     }
   };
 
-  const generateCustomerQR = async () => {
+  const generateCustomerQR = useCallback(async () => {
     if (!customer?.id) return;
     try {
+      // Stateless QR Token: timestamp ile replay attack önleme
+      // Esnaf tarafı 5 dakikadan eski QR'ları reddeder
       const qrData = JSON.stringify({
         type: 'customer_qr',
         customer_id: customer.id,
         name: customer.full_name || 'Müşteri',
+        ts: Date.now(), // Zaman damgası — güvenlik için
       });
 
       const url = await QRCode.toDataURL(qrData, {
         width: 300,
         margin: 2,
         color: { dark: '#1a5f4a', light: '#ffffff' },
+        errorCorrectionLevel: 'M', // Orta düzey hata düzeltme — hız/güvenilirlik dengesi
       });
       setQrCodeUrl(url);
     } catch (err) {
       console.error('QR generation error:', err);
     }
-  };
+  }, [customer?.id, customer?.full_name]);
+
+  // QR kodunu her 2 dakikada bir yenile (güvenlik — eski QR'lar geçersiz olur)
+  useEffect(() => {
+    if (!customer?.id) return;
+    const interval = setInterval(() => {
+      generateCustomerQR();
+    }, 2 * 60 * 1000); // 2 dakika
+    return () => clearInterval(interval);
+  }, [customer?.id, generateCustomerQR]);
 
   const fetchStoreBalances = useCallback(async () => {
     try {

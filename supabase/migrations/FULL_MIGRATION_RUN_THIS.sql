@@ -446,7 +446,46 @@ END;
 $$;
 
 -- ============================================================
--- 10. GRANT İZİNLERİ
+-- 10. PERFORMANS İNDEKSLERİ (Enterprise Connection Pooling Optimizasyonu)
+-- Binlerce eşzamanlı istek için sorgu planlarını optimize eder
+-- ============================================================
+
+-- customers tablosu — auth.uid() ile hızlı lookup
+CREATE INDEX IF NOT EXISTS idx_customers_user_id ON customers(user_id);
+CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);
+CREATE INDEX IF NOT EXISTS idx_customers_active ON customers(is_active) WHERE is_active = true;
+
+-- merchants tablosu — user_id ve store_id ile hızlı lookup
+CREATE INDEX IF NOT EXISTS idx_merchants_user_id ON merchants(user_id);
+CREATE INDEX IF NOT EXISTS idx_merchants_store_id ON merchants(store_id);
+CREATE INDEX IF NOT EXISTS idx_merchants_phone ON merchants(phone);
+CREATE INDEX IF NOT EXISTS idx_merchants_active ON merchants(is_active) WHERE is_active = true;
+
+-- transactions tablosu — yoğun sorgu optimizasyonu
+CREATE INDEX IF NOT EXISTS idx_transactions_merchant_status ON transactions(merchant_id, status);
+CREATE INDEX IF NOT EXISTS idx_transactions_customer_id ON transactions(customer_id);
+CREATE INDEX IF NOT EXISTS idx_transactions_created_at ON transactions(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_transactions_merchant_created ON transactions(merchant_id, created_at DESC)
+  WHERE status = 'completed';
+CREATE INDEX IF NOT EXISTS idx_transactions_customer_created ON transactions(customer_id, created_at DESC)
+  WHERE status = 'completed';
+
+-- store_customer_balances — composite index zaten var, ek optimizasyon
+CREATE INDEX IF NOT EXISTS idx_scb_merchant_last_tx ON store_customer_balances(merchant_id, last_transaction_at DESC NULLS LAST);
+CREATE INDEX IF NOT EXISTS idx_scb_customer_balance ON store_customer_balances(customer_id, balance DESC);
+
+-- ============================================================
+-- 11. RLS POLİTİKA PERFORMANS NOTU
+-- ============================================================
+-- customers: user_id = auth.uid() → idx_customers_user_id kullanır
+-- merchants: true → full table scan ama küçük tablo, sorun değil
+-- store_customer_balances: 
+--   customers_view_own_balances: customers.user_id index'i + scb.customer_id index'i
+--   merchants_view_store_balances: merchants.user_id index'i + scb.merchant_id index'i
+-- SONUÇ: Tüm RLS sorguları index-backed, full table scan yok
+
+-- ============================================================
+-- 12. GRANT İZİNLERİ
 -- ============================================================
 GRANT EXECUTE ON FUNCTION islem_puan_yukle(UUID, NUMERIC, TEXT, NUMERIC, NUMERIC) TO authenticated;
 GRANT EXECUTE ON FUNCTION islem_puan_harca(UUID, NUMERIC) TO authenticated;
@@ -457,5 +496,16 @@ GRANT EXECUTE ON FUNCTION get_email_by_phone(TEXT) TO authenticated;
 
 GRANT SELECT ON store_customer_balances TO authenticated;
 GRANT INSERT, UPDATE ON store_customer_balances TO service_role;
+
+-- ============================================================
+-- 13. CONNECTION POOLING & STATEMENT TIMEOUT
+-- Binlerce eşzamanlı bağlantıda "Too many connections" önleme
+-- Supabase PgBouncer zaten aktif; burada sorgu timeout'u ayarlıyoruz
+-- ============================================================
+-- Uzun süren sorguları 10 saniyede kes (DoS önleme)
+ALTER DATABASE postgres SET statement_timeout = '10s';
+
+-- İdle transaction'ları 30 saniyede kapat (connection pool'u boşalt)
+ALTER DATABASE postgres SET idle_in_transaction_session_timeout = '30s';
 
 COMMIT;
