@@ -2,6 +2,7 @@ import { Navigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { CustomerPanel } from './CustomerPanel';
 import { MerchantPanel } from './MerchantPanel';
+import { PwaInstallBanner } from '../components/PwaInstallBanner';
 import { AlertCircle, Loader2 } from 'lucide-react';
 
 export function Dashboard() {
@@ -46,8 +47,18 @@ export function Dashboard() {
   }
 
   if (userRole === 'merchant') {
-    return <MerchantPanel />;
+    return (
+      <>
+        <MerchantPanel />
+        <PwaInstallBanner variant="merchant" />
+      </>
+    );
   }
 
-  return <CustomerPanel />;
+  return (
+    <>
+      <CustomerPanel />
+      <PwaInstallBanner variant="customer" />
+    </>
+  );
 }

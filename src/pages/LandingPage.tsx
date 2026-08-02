@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { PwaInstallBanner } from '../components/PwaInstallBanner';
 import {
   Handshake,
   TrendingUp,
@@ -25,6 +26,7 @@ export function LandingPage() {
       <HowItWorksSection />
       <FAQSection />
       <ContactSection />
+      <PwaInstallBanner variant="customer" />
     </div>
   );
 }
