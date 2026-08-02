@@ -4,12 +4,9 @@ interface PwaInstallBannerProps {
   variant: 'customer' | 'merchant';
 }
 
-type FallbackHint = 'ios' | 'desktop' | null;
-
 export function PwaInstallBanner({ variant }: PwaInstallBannerProps) {
   const [showBanner, setShowBanner] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
-  const [fallbackHint, setFallbackHint] = useState<FallbackHint>(null);
   const deferredPromptRef = useRef<any>(null);
 
   const content = variant === 'merchant'
@@ -40,11 +37,10 @@ export function PwaInstallBanner({ variant }: PwaInstallBannerProps) {
     // Standalone değilse her zaman göster
     setShowBanner(true);
 
+    // beforeinstallprompt olayını global olarak yakala
     const handler = (e: Event) => {
       e.preventDefault();
       deferredPromptRef.current = e;
-      // Eğer hint gösteriliyorsa kaldır (prompt hazır)
-      setFallbackHint(null);
     };
 
     window.addEventListener('beforeinstallprompt', handler);
@@ -65,22 +61,9 @@ export function PwaInstallBanner({ variant }: PwaInstallBannerProps) {
     };
   }, []);
 
-  const detectPlatform = (): FallbackHint => {
-    const ua = navigator.userAgent || '';
-    const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-    const isSafari = /Safari/.test(ua) && !/Chrome/.test(ua) && !/CriOS/.test(ua);
-
-    if (isIOS || isSafari) {
-      return 'ios';
-    }
-
-    // Masaüstü Chrome/Edge ama deferredPrompt henüz yakalanmadı
-    return 'desktop';
-  };
-
   const handleInstall = async () => {
+    // deferredPrompt hazırsa doğrudan tarayıcının yükleme pop-up'ını aç
     if (deferredPromptRef.current) {
-      // deferredPrompt hazır — doğrudan PWA yükleme penceresini aç
       try {
         deferredPromptRef.current.prompt();
         const result = await deferredPromptRef.current.userChoice;
@@ -91,13 +74,9 @@ export function PwaInstallBanner({ variant }: PwaInstallBannerProps) {
         console.warn('PWA install prompt error:', err);
       }
       deferredPromptRef.current = null;
-    } else {
-      // deferredPrompt yok — platforma göre şık yönlendirme göster
-      const hint = detectPlatform();
-      setFallbackHint(hint);
     }
 
-    // Bildirim izni iste (sessizce)
+    // Bildirim izni iste (sessizce, hata vermeden)
     if ('Notification' in window && Notification.permission === 'default') {
       try {
         await Notification.requestPermission();
@@ -120,25 +99,6 @@ export function PwaInstallBanner({ variant }: PwaInstallBannerProps) {
         <button onClick={handleInstall} className="pwa-banner-btn">
           {content.button}
         </button>
-
-        {/* Fallback yönlendirme ipuçları */}
-        {fallbackHint === 'ios' && (
-          <div className="pwa-banner-hint">
-            <span className="pwa-banner-hint-icon">📲</span>
-            <span>
-              Ekranın altındaki <strong>Paylaş</strong> (⬆️) butonuna bas → <strong>"Ana Ekrana Ekle"</strong> seçeneğini seç.
-            </span>
-          </div>
-        )}
-
-        {fallbackHint === 'desktop' && (
-          <div className="pwa-banner-hint">
-            <span className="pwa-banner-hint-icon">💻</span>
-            <span>
-              Adres çubuğunun sağındaki <strong>⊕ Uygulamayı Yükle</strong> simgesine tıklayın.
-            </span>
-          </div>
-        )}
       </div>
     </div>
   );
