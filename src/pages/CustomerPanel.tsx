@@ -14,6 +14,10 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   Sparkles,
+  Building2,
+  Camera,
+  ShieldCheck,
+  ArrowLeft,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -52,6 +56,14 @@ interface NotificationItem {
   timestamp: string;
 }
 
+interface CashierAssignment {
+  cashier_id: string;
+  merchant_id: string;
+  store_name: string;
+  merchant_store_id: number;
+  is_active: boolean;
+}
+
 export function CustomerPanel() {
   const { user, profile, loading: authLoading, signOut } = useAuth();
   const navigate = useNavigate();
@@ -64,17 +76,31 @@ export function CustomerPanel() {
   const [latestNotification, setLatestNotification] = useState<NotificationItem | null>(null);
   const initializedRef = useRef(false);
 
+  // Kasiyer modu state
+  const [cashierAssignments, setCashierAssignments] = useState<CashierAssignment[]>([]);
+  const [cashierMode, setCashierMode] = useState(false);
+  const [selectedAssignment, setSelectedAssignment] = useState<CashierAssignment | null>(null);
+  const [cashierScanning, setCashierScanning] = useState(false);
+  const [cashierCustomer, setCashierCustomer] = useState<{ id: string; name: string } | null>(null);
+  const [cashierAmount, setCashierAmount] = useState('');
+  const [cashierPaymentType, setCashierPaymentType] = useState<'cash' | 'card'>('cash');
+  const [cashierPointsToSpend, setCashierPointsToSpend] = useState('');
+  const [cashierAction, setCashierAction] = useState<'earn' | 'spend'>('earn');
+  const [cashierProcessing, setCashierProcessing] = useState(false);
+  const [cashierResult, setCashierResult] = useState<any>(null);
+  const scannerRef = useRef<any>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
   const customer = profile as any;
 
   // Auth yüklenmesini bekle, sonra veri çek
   useEffect(() => {
-    if (authLoading) return; // Auth hâlâ yükleniyor, bekle
+    if (authLoading) return;
     if (!user) {
       navigate('/giris');
       return;
     }
     if (!customer?.id) {
-      // Profil yüklenemedi ama auth bitti — veri yüklemeyi durdur
       setDataLoading(false);
       return;
     }
@@ -91,11 +117,25 @@ export function CustomerPanel() {
         generateCustomerQR(),
         fetchStoreBalances(),
         fetchTransactions(),
+        checkCashierAuth(),
       ]);
     } catch (err) {
       console.error('CustomerPanel loadData error:', err);
     } finally {
       setDataLoading(false);
+    }
+  };
+
+  // Kasiyer yetkisi kontrolü
+  const checkCashierAuth = async () => {
+    try {
+      const { data, error } = await supabase.rpc('kasiyer_yetki_kontrol');
+      if (!error && data && (data as any).success) {
+        const assignments = (data as any).assignments || [];
+        setCashierAssignments(assignments);
+      }
+    } catch {
+      // RPC henüz yoksa sessizce devam
     }
   };
 
@@ -174,20 +214,18 @@ export function CustomerPanel() {
   const generateCustomerQR = useCallback(async () => {
     if (!customer?.id) return;
     try {
-      // Stateless QR Token: timestamp ile replay attack önleme
-      // Esnaf tarafı 5 dakikadan eski QR'ları reddeder
       const qrData = JSON.stringify({
         type: 'customer_qr',
         customer_id: customer.id,
         name: customer.full_name || 'Müşteri',
-        ts: Date.now(), // Zaman damgası — güvenlik için
+        ts: Date.now(),
       });
 
       const url = await QRCode.toDataURL(qrData, {
         width: 300,
         margin: 2,
         color: { dark: '#1a5f4a', light: '#ffffff' },
-        errorCorrectionLevel: 'M', // Orta düzey hata düzeltme — hız/güvenilirlik dengesi
+        errorCorrectionLevel: 'M',
       });
       setQrCodeUrl(url);
     } catch (err) {
@@ -195,12 +233,12 @@ export function CustomerPanel() {
     }
   }, [customer?.id, customer?.full_name]);
 
-  // QR kodunu her 2 dakikada bir yenile (güvenlik — eski QR'lar geçersiz olur)
+  // QR kodunu her 2 dakikada bir yenile
   useEffect(() => {
     if (!customer?.id) return;
     const interval = setInterval(() => {
       generateCustomerQR();
-    }, 2 * 60 * 1000); // 2 dakika
+    }, 2 * 60 * 1000);
     return () => clearInterval(interval);
   }, [customer?.id, generateCustomerQR]);
 
@@ -285,6 +323,160 @@ export function CustomerPanel() {
     }
   }, [customer?.id]);
 
+  // ============ KASİYER MODU FONKSİYONLARI ============
+
+  const startCashierScanner = async () => {
+    setCashierScanning(true);
+    setCashierCustomer(null);
+    setCashierResult(null);
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' },
+      });
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play();
+      }
+
+      // BarcodeDetector API kullan (modern tarayıcılar)
+      if ('BarcodeDetector' in window) {
+        const detector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
+        scannerRef.current = setInterval(async () => {
+          if (!videoRef.current) return;
+          try {
+            const barcodes = await detector.detect(videoRef.current);
+            if (barcodes.length > 0) {
+              handleCashierQRResult(barcodes[0].rawValue);
+            }
+          } catch {
+            // Frame okuma hatası — devam
+          }
+        }, 300);
+      } else {
+        // Fallback: html5-qrcode import
+        const { Html5Qrcode } = await import('html5-qrcode');
+        const scanner = new Html5Qrcode('cashier-qr-reader');
+        scannerRef.current = scanner;
+        await scanner.start(
+          { facingMode: 'environment' },
+          { fps: 10, qrbox: { width: 250, height: 250 } },
+          (decodedText: string) => {
+            handleCashierQRResult(decodedText);
+          },
+          () => {}
+        );
+      }
+    } catch (err) {
+      console.error('Camera error:', err);
+      setCashierScanning(false);
+    }
+  };
+
+  const stopCashierScanner = () => {
+    if (scannerRef.current) {
+      if (typeof scannerRef.current === 'number') {
+        clearInterval(scannerRef.current);
+      } else if (scannerRef.current.stop) {
+        scannerRef.current.stop().catch(() => {});
+      }
+      scannerRef.current = null;
+    }
+
+    if (videoRef.current && videoRef.current.srcObject) {
+      const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
+      tracks.forEach((t) => t.stop());
+      videoRef.current.srcObject = null;
+    }
+
+    setCashierScanning(false);
+  };
+
+  const handleCashierQRResult = (rawValue: string) => {
+    try {
+      const parsed = JSON.parse(rawValue);
+      if (parsed.type === 'customer_qr' && parsed.customer_id) {
+        // Timestamp kontrolü (5 dakika)
+        if (parsed.ts && Date.now() - parsed.ts > 5 * 60 * 1000) {
+          alert('QR kodu süresi dolmuş. Müşteriden yeni QR göstermesini isteyin.');
+          return;
+        }
+        stopCashierScanner();
+        setCashierCustomer({ id: parsed.customer_id, name: parsed.name || 'Müşteri' });
+      }
+    } catch {
+      // Geçersiz QR — devam
+    }
+  };
+
+  const handleCashierEarn = async () => {
+    if (!selectedAssignment || !cashierCustomer) return;
+    const amount = parseFloat(cashierAmount);
+    if (!amount || amount <= 0) return;
+
+    setCashierProcessing(true);
+    setCashierResult(null);
+
+    try {
+      const { data, error } = await supabase.rpc('kasiyer_puan_yukle', {
+        p_cashier_id: selectedAssignment.cashier_id,
+        p_customer_id: cashierCustomer.id,
+        p_amount: amount,
+        p_payment_type: cashierPaymentType,
+        p_cash_rate: 7,
+        p_card_rate: 5,
+      });
+
+      if (!error && data && (data as any).success) {
+        setCashierResult(data);
+        setCashierAmount('');
+      } else {
+        setCashierResult({ success: false, error: (data as any)?.error || error?.message || 'İşlem başarısız' });
+      }
+    } catch (err: any) {
+      setCashierResult({ success: false, error: 'Bağlantı hatası' });
+    }
+    setCashierProcessing(false);
+  };
+
+  const handleCashierSpend = async () => {
+    if (!selectedAssignment || !cashierCustomer) return;
+    const points = parseFloat(cashierPointsToSpend);
+    if (!points || points <= 0) return;
+
+    setCashierProcessing(true);
+    setCashierResult(null);
+
+    try {
+      const { data, error } = await supabase.rpc('kasiyer_puan_harca', {
+        p_cashier_id: selectedAssignment.cashier_id,
+        p_customer_id: cashierCustomer.id,
+        p_points_to_spend: points,
+      });
+
+      if (!error && data && (data as any).success) {
+        setCashierResult(data);
+        setCashierPointsToSpend('');
+      } else {
+        setCashierResult({ success: false, error: (data as any)?.error || error?.message || 'İşlem başarısız' });
+      }
+    } catch (err: any) {
+      setCashierResult({ success: false, error: 'Bağlantı hatası' });
+    }
+    setCashierProcessing(false);
+  };
+
+  const exitCashierMode = () => {
+    stopCashierScanner();
+    setCashierMode(false);
+    setSelectedAssignment(null);
+    setCashierCustomer(null);
+    setCashierResult(null);
+    setCashierAmount('');
+    setCashierPointsToSpend('');
+  };
+
   const totalBalance = storeBalances.reduce((sum, b) => sum + (b.balance || 0), 0);
   const totalEarned = storeBalances.reduce((sum, b) => sum + (b.total_earned || 0), 0);
   const totalSpent = storeBalances.reduce((sum, b) => sum + (b.total_spent || 0), 0);
@@ -327,6 +519,242 @@ export function CustomerPanel() {
     );
   }
 
+  // ============ KASİYER MODU EKRANI ============
+  if (cashierMode && selectedAssignment) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-indigo-50 via-white to-gray-50">
+        {/* Kasiyer Header */}
+        <header className="bg-gradient-to-r from-indigo-700 via-indigo-600 to-purple-600 text-white px-5 py-5 shadow-xl">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={exitCashierMode}
+                className="p-2 rounded-xl bg-white/10 hover:bg-white/20 transition"
+              >
+                <ArrowLeft className="w-5 h-5" />
+              </button>
+              <div>
+                <p className="text-indigo-200 text-xs font-medium uppercase tracking-wider">Kasiyer Modu</p>
+                <h1 className="text-lg font-bold mt-0.5">{selectedAssignment.store_name}</h1>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-indigo-200" />
+              <span className="text-xs text-indigo-200">{customer.full_name}</span>
+            </div>
+          </div>
+        </header>
+
+        <main className="p-4 pb-24 max-w-lg mx-auto space-y-4">
+          {/* Müşteri QR Tarama */}
+          {!cashierCustomer && (
+            <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100">
+              <h2 className="text-lg font-bold text-gray-800 mb-3 flex items-center gap-2">
+                <Camera className="w-5 h-5 text-indigo-600" />
+                Müşteri QR Kodunu Okutun
+              </h2>
+              <p className="text-sm text-gray-500 mb-4">
+                Müşterinin telefonundaki QR kodunu kameraya gösterin.
+              </p>
+
+              {cashierScanning ? (
+                <div className="space-y-3">
+                  <div className="relative rounded-xl overflow-hidden bg-black aspect-square">
+                    <video
+                      ref={videoRef}
+                      className="w-full h-full object-cover"
+                      playsInline
+                      muted
+                    />
+                    <div id="cashier-qr-reader" className="absolute inset-0" />
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <div className="w-48 h-48 border-2 border-white/60 rounded-2xl" />
+                    </div>
+                  </div>
+                  <button
+                    onClick={stopCashierScanner}
+                    className="w-full py-3 bg-red-100 text-red-700 rounded-xl font-semibold hover:bg-red-200 transition"
+                  >
+                    Taramayı Durdur
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={startCashierScanner}
+                  className="w-full py-4 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl font-semibold hover:from-indigo-700 hover:to-purple-700 transition flex items-center justify-center gap-2"
+                >
+                  <QrCode className="w-5 h-5" />
+                  QR Tara
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Müşteri Bulundu — İşlem Yap */}
+          {cashierCustomer && (
+            <div className="space-y-4">
+              {/* Müşteri Bilgisi */}
+              <div className="bg-white rounded-2xl shadow-lg p-5 border border-indigo-100">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 bg-gradient-to-br from-indigo-100 to-purple-100 rounded-xl flex items-center justify-center">
+                    <CheckCircle className="w-6 h-6 text-indigo-600" />
+                  </div>
+                  <div>
+                    <p className="font-bold text-gray-900">{cashierCustomer.name}</p>
+                    <p className="text-xs text-gray-500">Müşteri doğrulandı</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* İşlem Tipi Seçimi */}
+              <div className="bg-white rounded-2xl shadow-lg p-5 border border-gray-100">
+                <div className="flex gap-2 mb-4">
+                  <button
+                    onClick={() => setCashierAction('earn')}
+                    className={`flex-1 py-3 rounded-xl font-semibold text-sm transition ${
+                      cashierAction === 'earn'
+                        ? 'bg-emerald-600 text-white shadow-lg'
+                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    }`}
+                  >
+                    💰 Puan Yükle
+                  </button>
+                  <button
+                    onClick={() => setCashierAction('spend')}
+                    className={`flex-1 py-3 rounded-xl font-semibold text-sm transition ${
+                      cashierAction === 'spend'
+                        ? 'bg-orange-600 text-white shadow-lg'
+                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    }`}
+                  >
+                    🛒 Puan Harca
+                  </button>
+                </div>
+
+                {cashierAction === 'earn' ? (
+                  <div className="space-y-3">
+                    {/* Ödeme Tipi */}
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setCashierPaymentType('cash')}
+                        className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition ${
+                          cashierPaymentType === 'cash'
+                            ? 'bg-green-100 text-green-800 border-2 border-green-300'
+                            : 'bg-gray-50 text-gray-600 border border-gray-200'
+                        }`}
+                      >
+                        💵 Nakit
+                      </button>
+                      <button
+                        onClick={() => setCashierPaymentType('card')}
+                        className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition ${
+                          cashierPaymentType === 'card'
+                            ? 'bg-blue-100 text-blue-800 border-2 border-blue-300'
+                            : 'bg-gray-50 text-gray-600 border border-gray-200'
+                        }`}
+                      >
+                        💳 Kart
+                      </button>
+                    </div>
+
+                    {/* Tutar */}
+                    <div>
+                      <label className="text-sm font-medium text-gray-700 mb-1 block">Alışveriş Tutarı (₺)</label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={cashierAmount}
+                        onChange={(e) => setCashierAmount(e.target.value.replace(/[^0-9.,]/g, ''))}
+                        onFocus={(e) => e.target.select()}
+                        placeholder="0.00"
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-lg font-semibold text-center"
+                      />
+                    </div>
+
+                    <button
+                      onClick={handleCashierEarn}
+                      disabled={cashierProcessing || !cashierAmount}
+                      className="w-full py-3.5 bg-gradient-to-r from-emerald-600 to-emerald-700 text-white rounded-xl font-bold text-sm hover:from-emerald-700 hover:to-emerald-800 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center justify-center gap-2"
+                    >
+                      {cashierProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <TrendingUp className="w-5 h-5" />}
+                      Puan Yükle
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-sm font-medium text-gray-700 mb-1 block">Harcanacak Puan</label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={cashierPointsToSpend}
+                        onChange={(e) => setCashierPointsToSpend(e.target.value.replace(/[^0-9.,]/g, ''))}
+                        onFocus={(e) => e.target.select()}
+                        placeholder="0.00"
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-lg font-semibold text-center"
+                      />
+                    </div>
+
+                    <button
+                      onClick={handleCashierSpend}
+                      disabled={cashierProcessing || !cashierPointsToSpend}
+                      className="w-full py-3.5 bg-gradient-to-r from-orange-600 to-orange-700 text-white rounded-xl font-bold text-sm hover:from-orange-700 hover:to-orange-800 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center justify-center gap-2"
+                    >
+                      {cashierProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Wallet className="w-5 h-5" />}
+                      Puan Harca
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* İşlem Sonucu */}
+              {cashierResult && (
+                <div className={`rounded-2xl p-5 border ${
+                  cashierResult.success
+                    ? 'bg-emerald-50 border-emerald-200'
+                    : 'bg-red-50 border-red-200'
+                }`}>
+                  {cashierResult.success ? (
+                    <div className="text-center">
+                      <CheckCircle className="w-10 h-10 text-emerald-600 mx-auto mb-2" />
+                      <p className="font-bold text-emerald-800">{cashierResult.message}</p>
+                      {cashierResult.points && (
+                        <p className="text-sm text-emerald-600 mt-1">+{cashierResult.points} puan</p>
+                      )}
+                      {cashierResult.new_balance !== undefined && (
+                        <p className="text-xs text-gray-500 mt-1">Yeni bakiye: {cashierResult.new_balance} puan</p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-center">
+                      <AlertCircle className="w-10 h-10 text-red-500 mx-auto mb-2" />
+                      <p className="font-bold text-red-800">{cashierResult.error}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Yeni Müşteri Tara */}
+              <button
+                onClick={() => {
+                  setCashierCustomer(null);
+                  setCashierResult(null);
+                  setCashierAmount('');
+                  setCashierPointsToSpend('');
+                }}
+                className="w-full py-3 bg-gray-100 text-gray-700 rounded-xl font-semibold hover:bg-gray-200 transition flex items-center justify-center gap-2"
+              >
+                <QrCode className="w-4 h-4" />
+                Yeni Müşteri Tara
+              </button>
+            </div>
+          )}
+        </main>
+      </div>
+    );
+  }
+
+  // ============ NORMAL MÜŞTERİ PANELİ ============
   return (
     <div className="min-h-screen bg-gradient-to-b from-emerald-50 via-white to-gray-50">
       {/* Anlık Bildirim */}
@@ -404,6 +832,41 @@ export function CustomerPanel() {
             </div>
           </div>
         </div>
+
+        {/* Kasiyer Modu Butonu — sadece yetkili müşterilere gösterilir */}
+        {cashierAssignments.length > 0 && (
+          <div className="mt-3">
+            {cashierAssignments.length === 1 ? (
+              <button
+                onClick={() => {
+                  setSelectedAssignment(cashierAssignments[0]);
+                  setCashierMode(true);
+                }}
+                className="w-full py-3 bg-white/15 backdrop-blur-sm border border-white/30 rounded-xl text-white font-semibold text-sm hover:bg-white/25 transition flex items-center justify-center gap-2"
+              >
+                <Building2 className="w-4 h-4" />
+                🏢 Kasiyer İşlemleri — {cashierAssignments[0].store_name}
+              </button>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-emerald-200 text-xs font-medium">Kasiyer Yetkileri:</p>
+                {cashierAssignments.map((a) => (
+                  <button
+                    key={a.cashier_id}
+                    onClick={() => {
+                      setSelectedAssignment(a);
+                      setCashierMode(true);
+                    }}
+                    className="w-full py-2.5 bg-white/15 backdrop-blur-sm border border-white/30 rounded-xl text-white font-semibold text-sm hover:bg-white/25 transition flex items-center justify-center gap-2"
+                  >
+                    <Building2 className="w-4 h-4" />
+                    🏢 {a.store_name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </header>
 
       {/* Tab Navigation */}

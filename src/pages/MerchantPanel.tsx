@@ -476,15 +476,17 @@ export function MerchantPanel() {
     try {
       const { data, error } = await supabase.rpc('kasiyer_ekle', {
         p_phone: newCashierPhone.trim(),
-        p_full_name: newCashierName.trim() || 'Kasiyer',
+        p_full_name: newCashierName.trim() || '',
       });
       if (!error && data && (data as any).success) {
-        toast.success('Kasiyer eklendi!');
+        const customerName = (data as any).customer_name || 'Kasiyer';
+        toast.success(`${customerName} kasiyer olarak eklendi!`);
         setNewCashierPhone('');
         setNewCashierName('');
         fetchCashiers();
       } else {
-        toast.error('Kasiyer eklenemedi', (data as any)?.error || error?.message || '');
+        const errMsg = (data as any)?.error || error?.message || 'Kasiyer eklenemedi';
+        toast.error(errMsg);
       }
     } catch (err: any) {
       toast.error('Bağlantı hatası');
@@ -1548,9 +1550,12 @@ export function MerchantPanel() {
                 <UserPlus className="w-4 h-4 text-emerald-600" />
                 Yeni Kasiyer Ekle
               </h3>
+              <p className="text-xs text-gray-500 bg-indigo-50 border border-indigo-100 rounded-lg p-2">
+                💡 Sisteme kayıtlı bir müşterinin telefon numarasını girin. O müşteri kendi panelinden kasiyer işlemleri yapabilecek.
+              </p>
               <div className="grid grid-cols-1 gap-3">
                 <div>
-                  <label className="text-xs text-gray-500 mb-1 block">Ad Soyad</label>
+                  <label className="text-xs text-gray-500 mb-1 block">Ad Soyad (opsiyonel — boş bırakılırsa müşteri adı kullanılır)</label>
                   <input
                     type="text"
                     value={newCashierName}
