@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
+import { X } from 'lucide-react';
 
 const PWA_INSTALLED_KEY = 'pwa_installed';
+const PWA_DISMISSED_KEY = 'pwa_banner_dismissed';
 
 interface PwaInstallBannerProps {
   variant: 'customer' | 'merchant';
@@ -23,25 +25,30 @@ export function PwaInstallBanner({ variant }: PwaInstallBannerProps) {
       };
 
   useEffect(() => {
-    // 1. Daha önce kurulmuş mu kontrol et
+    // 1. Daha önce kapatılmış mı kontrol et
+    if (localStorage.getItem(PWA_DISMISSED_KEY) === 'true') {
+      setShowBanner(false);
+      return;
+    }
+
+    // 2. Daha önce kurulmuş mu kontrol et
     if (localStorage.getItem(PWA_INSTALLED_KEY) === 'true') {
       setShowBanner(false);
       return;
     }
 
-    // 2. Standalone modda mı kontrol et
+    // 3. Standalone modda mı kontrol et
     const isStandalone =
       window.matchMedia('(display-mode: standalone)').matches ||
       (window.navigator as any).standalone === true;
 
     if (isStandalone) {
-      // Standalone modda açıldıysa kurulmuş demektir — bayrağı kaydet
       localStorage.setItem(PWA_INSTALLED_KEY, 'true');
       setShowBanner(false);
       return;
     }
 
-    // 3. Kurulmamış ve standalone değil — banner'ı göster
+    // 4. Kurulmamış, kapatılmamış ve standalone değil — banner'ı göster
     setShowBanner(true);
 
     // beforeinstallprompt olayını global olarak yakala
@@ -51,14 +58,14 @@ export function PwaInstallBanner({ variant }: PwaInstallBannerProps) {
     };
     window.addEventListener('beforeinstallprompt', beforeInstallHandler);
 
-    // appinstalled olayını dinle — kurulum tamamlandığında bayrağı kaydet
+    // appinstalled olayını dinle
     const appInstalledHandler = () => {
       localStorage.setItem(PWA_INSTALLED_KEY, 'true');
       setShowBanner(false);
     };
     window.addEventListener('appinstalled', appInstalledHandler);
 
-    // Standalone moda geçiş dinle (kurulum sonrası)
+    // Standalone moda geçiş dinle
     const mediaQuery = window.matchMedia('(display-mode: standalone)');
     const standaloneListener = (e: MediaQueryListEvent) => {
       if (e.matches) {
@@ -76,13 +83,11 @@ export function PwaInstallBanner({ variant }: PwaInstallBannerProps) {
   }, []);
 
   const handleInstall = async () => {
-    // deferredPrompt hazırsa doğrudan tarayıcının yükleme pop-up'ını aç
     if (deferredPromptRef.current) {
       try {
         deferredPromptRef.current.prompt();
         const result = await deferredPromptRef.current.userChoice;
         if (result.outcome === 'accepted') {
-          // Kullanıcı kabul etti — bayrağı kaydet ve banner'ı gizle
           localStorage.setItem(PWA_INSTALLED_KEY, 'true');
           setShowBanner(false);
         }
@@ -92,22 +97,34 @@ export function PwaInstallBanner({ variant }: PwaInstallBannerProps) {
       deferredPromptRef.current = null;
     }
 
-    // Bildirim izni iste (sessizce, hata vermeden)
+    // Bildirim izni iste
     if ('Notification' in window && Notification.permission === 'default') {
       try {
         await Notification.requestPermission();
       } catch {
-        // Kullanıcı reddetti veya hata — sessizce devam
+        // Sessizce devam
       }
     }
   };
 
-  // Banner gösterilmeyecekse render etme
+  const handleDismiss = () => {
+    localStorage.setItem(PWA_DISMISSED_KEY, 'true');
+    setShowBanner(false);
+  };
+
   if (!showBanner) return null;
 
   return (
     <div className="pwa-banner">
       <div className="pwa-banner-inner">
+        {/* Kapatma Butonu */}
+        <button
+          onClick={handleDismiss}
+          className="pwa-banner-close"
+          aria-label="Kapat"
+        >
+          <X className="w-4 h-4" />
+        </button>
         <div className="pwa-banner-text">
           <h3 className="pwa-banner-title">{content.title}</h3>
           <p className="pwa-banner-desc">{content.description}</p>

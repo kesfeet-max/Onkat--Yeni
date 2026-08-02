@@ -502,12 +502,12 @@ BEGIN
   FROM store_customer_balances
   WHERE customer_id = p_customer_id AND merchant_id = v_merchant.id;
 
-  -- Transaction kaydı
+  -- Transaction kaydı (amount = harcanan puan, transactions_amount_check: amount > 0)
   INSERT INTO transactions (
     idempotency_key, customer_id, merchant_id, type, amount, points,
     status, cashier_id, cashier_name, created_at
   ) VALUES (
-    gen_random_uuid()::text, p_customer_id, v_merchant.id, 'spend', 0, p_points_to_spend,
+    gen_random_uuid()::text, p_customer_id, v_merchant.id, 'spend', p_points_to_spend, p_points_to_spend,
     'completed', v_cashier.id, v_cashier.full_name, NOW()
   ) RETURNING id INTO v_tx_id;
 
@@ -816,11 +816,12 @@ BEGIN
   FROM store_customer_balances
   WHERE customer_id = p_customer_id AND merchant_id = v_merchant.id;
 
+  -- amount = harcanan puan (transactions_amount_check: amount > 0)
   INSERT INTO transactions (
     idempotency_key, customer_id, merchant_id, type, amount, points,
     status, cashier_id, cashier_name, created_at
   ) VALUES (
-    gen_random_uuid()::text, p_customer_id, v_merchant.id, 'spend', 0, p_points_to_spend,
+    gen_random_uuid()::text, p_customer_id, v_merchant.id, 'spend', p_points_to_spend, p_points_to_spend,
     'completed', p_cashier_id, p_cashier_name, NOW()
   ) RETURNING id INTO v_tx_id;
 
