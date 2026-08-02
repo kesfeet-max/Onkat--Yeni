@@ -25,6 +25,14 @@ import {
   ChevronRight,
   ClipboardList,
   SwitchCamera,
+  UserPlus,
+  Shield,
+  Clock,
+  ToggleLeft,
+  ToggleRight,
+  Phone,
+  Trash2,
+  Moon,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -33,7 +41,7 @@ import { QREngine, CameraFacing, getSavedCameraPreference } from '../lib/qr-engi
 import { withRetry, resilientRpc, resilientQuery } from '../lib/retry';
 import { toast } from '../lib/toast';
 
-type MerchantTab = 'islem' | 'musteriler' | 'gecmis' | 'ayarlar';
+type MerchantTab = 'islem' | 'musteriler' | 'gecmis' | 'kasiyerler' | 'guvenlik' | 'ayarlar';
 
 interface CustomerInfo {
   customer_id: string;
@@ -60,6 +68,9 @@ interface TransactionRecord {
   points: number;
   status: string;
   created_at: string;
+  payment_type?: 'cash' | 'card' | null;
+  cashier_id?: string | null;
+  cashier_name?: string | null;
   customer_name?: string;
 }
 
@@ -78,6 +89,19 @@ export function MerchantPanel() {
   // Geçmiş Tab — Takvim/Tarih Filtresi
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
+
+  // Kasiyer Yönetimi
+  const [cashiers, setCashiers] = useState<any[]>([]);
+  const [newCashierPhone, setNewCashierPhone] = useState('');
+  const [newCashierName, setNewCashierName] = useState('');
+  const [addingCashier, setAddingCashier] = useState(false);
+
+  // Güvenlik & Mesai Ayarları
+  const [storeOpen, setStoreOpen] = useState(true);
+  const [autoSchedule, setAutoSchedule] = useState(false);
+  const [openingHour, setOpeningHour] = useState('09:00');
+  const [closingHour, setClosingHour] = useState('22:00');
+  const [savingSettings, setSavingSettings] = useState(false);
 
   // QR Scanner state — Enterprise QR Engine
   const [showScanner, setShowScanner] = useState(false);
@@ -107,6 +131,8 @@ export function MerchantPanel() {
     // Önce müşterileri yükle, sonra işlemleri (isimleri eşleştirmek için)
     fetchMyCustomers().then(() => fetchTransactions());
     fetchMerchantSettings();
+    fetchCashiers();
+    fetchStoreSettings();
   }, [authLoading, user, navigate]);
 
   // Realtime
@@ -429,6 +455,96 @@ export function MerchantPanel() {
     setSavingRate(false);
   };
 
+  // ============ KASİYER YÖNETİMİ FONKSİYONLARI ============
+  const fetchCashiers = async () => {
+    try {
+      const { data, error } = await supabase.rpc('kasiyer_listele');
+      if (!error && data && (data as any).success) {
+        setCashiers((data as any).cashiers || []);
+      }
+    } catch {
+      // RPC henüz yoksa sessizce devam
+    }
+  };
+
+  const addCashier = async () => {
+    if (!newCashierPhone.trim()) {
+      toast.error('Telefon numarası gerekli');
+      return;
+    }
+    setAddingCashier(true);
+    try {
+      const { data, error } = await supabase.rpc('kasiyer_ekle', {
+        p_phone: newCashierPhone.trim(),
+        p_full_name: newCashierName.trim() || 'Kasiyer',
+      });
+      if (!error && data && (data as any).success) {
+        toast.success('Kasiyer eklendi!');
+        setNewCashierPhone('');
+        setNewCashierName('');
+        fetchCashiers();
+      } else {
+        toast.error('Kasiyer eklenemedi', (data as any)?.error || error?.message || '');
+      }
+    } catch (err: any) {
+      toast.error('Bağlantı hatası');
+    }
+    setAddingCashier(false);
+  };
+
+  const toggleCashier = async (cashierId: string, currentActive: boolean) => {
+    try {
+      const { data, error } = await supabase.rpc('kasiyer_durum_degistir', {
+        p_cashier_id: cashierId,
+        p_is_active: !currentActive,
+      });
+      if (!error && data && (data as any).success) {
+        toast.success(currentActive ? 'Kasiyer pasife alındı' : 'Kasiyer aktifleştirildi');
+        fetchCashiers();
+      }
+    } catch {
+      toast.error('İşlem başarısız');
+    }
+  };
+
+  // ============ GÜVENLİK & MESAİ AYARLARI ============
+  const fetchStoreSettings = async () => {
+    try {
+      const { data, error } = await supabase.rpc('magaza_ayar_getir');
+      if (!error && data && (data as any).success) {
+        const s = data as any;
+        setStoreOpen(s.store_open ?? true);
+        setAutoSchedule(s.auto_schedule_enabled ?? false);
+        if (s.opening_hour) setOpeningHour(s.opening_hour);
+        if (s.closing_hour) setClosingHour(s.closing_hour);
+      }
+    } catch {
+      // RPC henüz yoksa varsayılanlarla devam
+    }
+  };
+
+  const saveStoreSettings = async () => {
+    setSavingSettings(true);
+    try {
+      const { data, error } = await supabase.rpc('magaza_ayar_kaydet', {
+        p_store_open: storeOpen,
+        p_auto_schedule: autoSchedule,
+        p_opening_hour: autoSchedule ? openingHour : null,
+        p_closing_hour: autoSchedule ? closingHour : null,
+      });
+      if (!error && data && (data as any).success) {
+        toast.success('Mağaza ayarları kaydedildi!');
+        setMessage({ type: 'success', text: 'Güvenlik ayarları güncellendi!' });
+      } else {
+        toast.error('Ayarlar kaydedilemedi');
+      }
+    } catch {
+      toast.error('Bağlantı hatası');
+    }
+    setTimeout(() => setMessage(null), 3000);
+    setSavingSettings(false);
+  };
+
   // QR Scanner — Enterprise: Kamera milisaniyeler içinde açılır
   const startScanner = useCallback(async () => {
     // Önce UI'ı göster — kullanıcı anında feedback alsın
@@ -572,12 +688,16 @@ export function MerchantPanel() {
     setMessage(null);
 
     try {
+      // Aktif kasiyer varsa bilgisini ekle
+      const activeCashier = cashiers.find((c: any) => c.is_active && c.user_id === user?.id);
       const { data: result, error } = await resilientRpc(supabase, 'islem_puan_yukle', {
         p_customer_id: customerInfo.customer_id,
         p_amount: numAmount,
         p_payment_type: paymentType,
         p_cash_rate: cashPointsRate,
         p_card_rate: cardPointsRate,
+        p_cashier_id: activeCashier?.id || null,
+        p_cashier_name: activeCashier?.full_name || null,
       }, {
         maxAttempts: 2, // Finansal işlem — max 2 deneme (idempotency key ile güvenli)
         onRetry: (attempt) => {
@@ -630,9 +750,13 @@ export function MerchantPanel() {
     setMessage(null);
 
     try {
+      // Aktif kasiyer varsa bilgisini ekle
+      const activeCashier = cashiers.find((c: any) => c.is_active && c.user_id === user?.id);
       const { data: result, error } = await resilientRpc(supabase, 'islem_puan_harca', {
         p_customer_id: customerInfo.customer_id,
         p_points_to_spend: numPoints,
+        p_cashier_id: activeCashier?.id || null,
+        p_cashier_name: activeCashier?.full_name || null,
       }, {
         maxAttempts: 2,
         onRetry: (attempt) => {
@@ -757,49 +881,71 @@ export function MerchantPanel() {
 
       {/* Tab Navigation */}
       <nav className="bg-white border-b shadow-sm sticky top-0 z-40">
-        <div className="flex">
+        <div className="flex overflow-x-auto scrollbar-hide">
           <button
             onClick={() => setActiveTab('islem')}
-            className={`flex-1 py-3.5 px-1 text-center text-xs font-semibold border-b-3 transition ${
+            className={`flex-1 min-w-[60px] py-3 px-1 text-center text-[10px] font-semibold border-b-3 transition ${
               activeTab === 'islem'
                 ? 'border-emerald-600 text-emerald-700 bg-emerald-50/50'
                 : 'border-transparent text-gray-500'
             }`}
           >
-            <QrCode className="w-5 h-5 mx-auto mb-1" />
+            <QrCode className="w-4 h-4 mx-auto mb-0.5" />
             İşlem
           </button>
           <button
             onClick={() => setActiveTab('musteriler')}
-            className={`flex-1 py-3.5 px-1 text-center text-xs font-semibold border-b-3 transition ${
+            className={`flex-1 min-w-[60px] py-3 px-1 text-center text-[10px] font-semibold border-b-3 transition ${
               activeTab === 'musteriler'
                 ? 'border-emerald-600 text-emerald-700 bg-emerald-50/50'
                 : 'border-transparent text-gray-500'
             }`}
           >
-            <Users className="w-5 h-5 mx-auto mb-1" />
+            <Users className="w-4 h-4 mx-auto mb-0.5" />
             Müşteriler
           </button>
           <button
             onClick={() => setActiveTab('gecmis')}
-            className={`flex-1 py-3.5 px-1 text-center text-xs font-semibold border-b-3 transition ${
+            className={`flex-1 min-w-[60px] py-3 px-1 text-center text-[10px] font-semibold border-b-3 transition ${
               activeTab === 'gecmis'
                 ? 'border-emerald-600 text-emerald-700 bg-emerald-50/50'
                 : 'border-transparent text-gray-500'
             }`}
           >
-            <History className="w-5 h-5 mx-auto mb-1" />
+            <History className="w-4 h-4 mx-auto mb-0.5" />
             Geçmiş
           </button>
           <button
+            onClick={() => setActiveTab('kasiyerler')}
+            className={`flex-1 min-w-[60px] py-3 px-1 text-center text-[10px] font-semibold border-b-3 transition ${
+              activeTab === 'kasiyerler'
+                ? 'border-emerald-600 text-emerald-700 bg-emerald-50/50'
+                : 'border-transparent text-gray-500'
+            }`}
+          >
+            <UserPlus className="w-4 h-4 mx-auto mb-0.5" />
+            Kasiyerler
+          </button>
+          <button
+            onClick={() => setActiveTab('guvenlik')}
+            className={`flex-1 min-w-[60px] py-3 px-1 text-center text-[10px] font-semibold border-b-3 transition ${
+              activeTab === 'guvenlik'
+                ? 'border-emerald-600 text-emerald-700 bg-emerald-50/50'
+                : 'border-transparent text-gray-500'
+            }`}
+          >
+            <Shield className="w-4 h-4 mx-auto mb-0.5" />
+            Güvenlik
+          </button>
+          <button
             onClick={() => setActiveTab('ayarlar')}
-            className={`flex-1 py-3.5 px-1 text-center text-xs font-semibold border-b-3 transition ${
+            className={`flex-1 min-w-[60px] py-3 px-1 text-center text-[10px] font-semibold border-b-3 transition ${
               activeTab === 'ayarlar'
                 ? 'border-emerald-600 text-emerald-700 bg-emerald-50/50'
                 : 'border-transparent text-gray-500'
             }`}
           >
-            <Settings className="w-5 h-5 mx-auto mb-1" />
+            <Settings className="w-4 h-4 mx-auto mb-0.5" />
             Ayarlar
           </button>
         </div>
@@ -1323,44 +1469,281 @@ export function MerchantPanel() {
                   <p className="text-xs text-gray-500 font-medium px-1">
                     {selectedDate.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' })} — {filteredTx.length} işlem
                   </p>
-                  {filteredTx.map((tx) => (
-                    <div key={tx.id} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                            tx.type === 'earn'
-                              ? 'bg-gradient-to-br from-emerald-100 to-emerald-200'
-                              : 'bg-gradient-to-br from-orange-100 to-orange-200'
-                          }`}>
-                            {tx.type === 'earn' ? (
-                              <TrendingUp className="w-5 h-5 text-emerald-600" />
-                            ) : (
-                              <Wallet className="w-5 h-5 text-orange-600" />
+                  {filteredTx.map((tx) => {
+                    const txHour = new Date(tx.created_at).getHours();
+                    const isNightTransaction = txHour < 6 || txHour >= 23;
+                    const payType = (tx as any).payment_type;
+                    const cashierName = (tx as any).cashier_name;
+                    return (
+                      <div key={tx.id} className={`bg-white rounded-xl p-4 shadow-sm border ${isNightTransaction ? 'border-indigo-200 ring-1 ring-indigo-100' : 'border-gray-100'}`}>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                              tx.type === 'earn'
+                                ? 'bg-gradient-to-br from-emerald-100 to-emerald-200'
+                                : 'bg-gradient-to-br from-orange-100 to-orange-200'
+                            }`}>
+                              {tx.type === 'earn' ? (
+                                <TrendingUp className="w-5 h-5 text-emerald-600" />
+                              ) : (
+                                <Wallet className="w-5 h-5 text-orange-600" />
+                              )}
+                            </div>
+                            <div>
+                              <p className="font-semibold text-gray-900 text-sm">{tx.customer_name}</p>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <p className="text-xs text-gray-400">{formatTime(tx.created_at)}</p>
+                                <span className="text-xs text-gray-300">•</span>
+                                <p className="text-xs text-gray-400">{tx.type === 'earn' ? 'Yükleme' : 'Harcama'}</p>
+                                {payType && (
+                                  <>
+                                    <span className="text-xs text-gray-300">•</span>
+                                    <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${payType === 'cash' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
+                                      {payType === 'cash' ? '💵 Nakit' : '💳 Kart'}
+                                    </span>
+                                  </>
+                                )}
+                              </div>
+                              {cashierName && (
+                                <p className="text-xs text-purple-500 mt-0.5 flex items-center gap-1">
+                                  <UserPlus className="w-3 h-3" />
+                                  Kasiyer: {cashierName}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className={`font-bold ${
+                              tx.type === 'earn' ? 'text-emerald-600' : 'text-orange-600'
+                            }`}>
+                              {tx.type === 'earn' ? '+' : '-'}{(tx.points || 0).toFixed(2)}
+                            </p>
+                            {tx.type === 'earn' && tx.amount > 0 && (
+                              <p className="text-xs text-gray-400">{formatCurrency(tx.amount)}</p>
+                            )}
+                            {isNightTransaction && (
+                              <span className="inline-flex items-center gap-0.5 text-[10px] text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded mt-1">
+                                <Moon className="w-3 h-3" /> Gece
+                              </span>
                             )}
                           </div>
-                          <div>
-                            <p className="font-semibold text-gray-900 text-sm">{tx.customer_name}</p>
-                            <p className="text-xs text-gray-400">{formatTime(tx.created_at)} • {tx.type === 'earn' ? 'Puan Yükleme' : 'Puan Harcama'}</p>
-                          </div>
                         </div>
-                        <div className="text-right">
-                          <p className={`font-bold ${
-                            tx.type === 'earn' ? 'text-emerald-600' : 'text-orange-600'
-                          }`}>
-                            {tx.type === 'earn' ? '+' : '-'}{(tx.points || 0).toFixed(2)}
-                          </p>
-                          {tx.type === 'earn' && tx.amount > 0 && (
-                            <p className="text-xs text-gray-400">{formatCurrency(tx.amount)}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* Kasiyerler Tab */}
+        {activeTab === 'kasiyerler' && (
+          <div className="space-y-4">
+            <h2 className="text-lg font-bold text-gray-800">Kasiyer Yönetimi</h2>
+
+            {/* Yeni Kasiyer Ekle */}
+            <div className="bg-white rounded-2xl shadow-lg p-5 border border-gray-100 space-y-3">
+              <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                <UserPlus className="w-4 h-4 text-emerald-600" />
+                Yeni Kasiyer Ekle
+              </h3>
+              <div className="grid grid-cols-1 gap-3">
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Ad Soyad</label>
+                  <input
+                    type="text"
+                    value={newCashierName}
+                    onChange={(e) => setNewCashierName(e.target.value)}
+                    placeholder="Kasiyer adı"
+                    className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Telefon Numarası</label>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                      <input
+                        type="tel"
+                        inputMode="tel"
+                        value={newCashierPhone}
+                        onChange={(e) => setNewCashierPhone(e.target.value.replace(/[^0-9+]/g, ''))}
+                        placeholder="05XX XXX XX XX"
+                        className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm"
+                      />
+                    </div>
+                    <button
+                      onClick={addCashier}
+                      disabled={addingCashier || !newCashierPhone.trim()}
+                      className="px-4 py-2.5 bg-emerald-600 text-white rounded-xl text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center gap-1.5"
+                    >
+                      {addingCashier ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+                      Ekle
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Kasiyer Listesi */}
+            <div className="bg-white rounded-2xl shadow-lg p-5 border border-gray-100">
+              <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                <Users className="w-4 h-4 text-emerald-600" />
+                Kayıtlı Kasiyerler ({cashiers.length})
+              </h3>
+              {cashiers.length === 0 ? (
+                <div className="text-center py-8 text-gray-400">
+                  <Users className="w-10 h-10 mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">Henüz kasiyer eklenmemiş</p>
+                  <p className="text-xs mt-1">Yukarıdan telefon numarasıyla ekleyebilirsiniz</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {cashiers.map((c: any) => (
+                    <div key={c.id} className={`flex items-center justify-between p-3 rounded-xl border transition ${c.is_active ? 'bg-emerald-50/50 border-emerald-200' : 'bg-gray-50 border-gray-200 opacity-60'}`}>
+                      <div className="flex-1">
+                        <p className="font-semibold text-sm text-gray-800">{c.full_name || 'İsimsiz'}</p>
+                        <p className="text-xs text-gray-500">{c.phone}</p>
+                        {c.last_login && (
+                          <p className="text-xs text-gray-400 mt-0.5">Son giriş: {formatDate(c.last_login)}</p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => toggleCashier(c.id, c.is_active)}
+                          className="p-2 rounded-lg hover:bg-gray-100 transition"
+                          title={c.is_active ? 'Pasife Al' : 'Aktifleştir'}
+                        >
+                          {c.is_active ? (
+                            <ToggleRight className="w-6 h-6 text-emerald-600" />
+                          ) : (
+                            <ToggleLeft className="w-6 h-6 text-gray-400" />
                           )}
-                        </div>
+                        </button>
                       </div>
                     </div>
                   ))}
                 </div>
               )}
             </div>
-          );
-        })()}
+
+            {/* Bilgi Notu */}
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+              <p className="text-xs text-blue-700">
+                Kasiyerler, sizin adınıza puan yükleme ve harcama işlemi yapabilir. Tüm işlemler kasiyer adıyla kayıt altına alınır.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Güvenlik & Mesai Tab */}
+        {activeTab === 'guvenlik' && (
+          <div className="space-y-4">
+            <h2 className="text-lg font-bold text-gray-800">Güvenlik & Mesai Ayarları</h2>
+
+            {/* Kasa Açık/Kapalı */}
+            <div className="bg-white rounded-2xl shadow-lg p-5 border border-gray-100 space-y-4">
+              <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                <Store className="w-4 h-4 text-emerald-600" />
+                Kasa Durumu
+              </h3>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-medium text-gray-800">{storeOpen ? 'Kasa Açık' : 'Kasa Kapalı'}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {storeOpen ? 'İşlem kabul ediliyor' : 'İşlemler geçici olarak durduruldu'}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setStoreOpen(!storeOpen)}
+                  className={`relative w-14 h-7 rounded-full transition-colors ${storeOpen ? 'bg-emerald-500' : 'bg-gray-300'}`}
+                >
+                  <span className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow transition-transform ${storeOpen ? 'left-7' : 'left-0.5'}`} />
+                </button>
+              </div>
+              {!storeOpen && (
+                <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-orange-600 shrink-0 mt-0.5" />
+                  <p className="text-xs text-orange-700">
+                    Kasa kapalıyken müşteriler puan yükleyemez veya harcayamaz. QR tarama devre dışıdır.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Otomatik Mesai */}
+            <div className="bg-white rounded-2xl shadow-lg p-5 border border-gray-100 space-y-4">
+              <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                <Clock className="w-4 h-4 text-emerald-600" />
+                Otomatik Mesai Saatleri
+              </h3>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-medium text-gray-800">Zamanlı Kasa Kontrolü</p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Belirlenen saatlerde kasa otomatik açılır/kapanır
+                  </p>
+                </div>
+                <button
+                  onClick={() => setAutoSchedule(!autoSchedule)}
+                  className={`relative w-14 h-7 rounded-full transition-colors ${autoSchedule ? 'bg-emerald-500' : 'bg-gray-300'}`}
+                >
+                  <span className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow transition-transform ${autoSchedule ? 'left-7' : 'left-0.5'}`} />
+                </button>
+              </div>
+
+              {autoSchedule && (
+                <div className="grid grid-cols-2 gap-3 mt-3">
+                  <div>
+                    <label className="text-xs text-gray-500 mb-1 block">Açılış Saati</label>
+                    <input
+                      type="time"
+                      value={openingHour}
+                      onChange={(e) => setOpeningHour(e.target.value)}
+                      className="w-full px-3 py-2.5 rounded-xl border border-gray-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500 mb-1 block">Kapanış Saati</label>
+                    <input
+                      type="time"
+                      value={closingHour}
+                      onChange={(e) => setClosingHour(e.target.value)}
+                      className="w-full px-3 py-2.5 rounded-xl border border-gray-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Gece İşlem Uyarısı */}
+            <div className="bg-white rounded-2xl shadow-lg p-5 border border-gray-100 space-y-3">
+              <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                <Moon className="w-4 h-4 text-indigo-600" />
+                Gece İşlem Bildirimi
+              </h3>
+              <p className="text-xs text-gray-500">
+                Mesai saatleri dışında yapılan işlemler otomatik olarak <span className="font-medium text-indigo-600">"Gece İşlemi"</span> rozeti ile işaretlenir ve geçmişte vurgulanır.
+              </p>
+            </div>
+
+            {/* Kaydet Butonu */}
+            <button
+              onClick={saveStoreSettings}
+              disabled={savingSettings}
+              className="w-full py-3.5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transition disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {savingSettings ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <Shield className="w-5 h-5" />
+              )}
+              Güvenlik Ayarlarını Kaydet
+            </button>
+          </div>
+        )}
 
         {/* Ayarlar Tab */}
         {activeTab === 'ayarlar' && (

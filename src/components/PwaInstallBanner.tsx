@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
 
+const PWA_INSTALLED_KEY = 'pwa_installed';
+
 interface PwaInstallBannerProps {
   variant: 'customer' | 'merchant';
 }
 
 export function PwaInstallBanner({ variant }: PwaInstallBannerProps) {
   const [showBanner, setShowBanner] = useState(false);
-  const [isStandalone, setIsStandalone] = useState(false);
   const deferredPromptRef = useRef<any>(null);
 
   const content = variant === 'merchant'
@@ -22,41 +23,54 @@ export function PwaInstallBanner({ variant }: PwaInstallBannerProps) {
       };
 
   useEffect(() => {
-    // Standalone mod kontrolü
-    const standaloneCheck =
-      window.matchMedia('(display-mode: standalone)').matches ||
-      (window.navigator as any).standalone === true;
-
-    setIsStandalone(standaloneCheck);
-
-    if (standaloneCheck) {
+    // 1. Daha önce kurulmuş mu kontrol et
+    if (localStorage.getItem(PWA_INSTALLED_KEY) === 'true') {
       setShowBanner(false);
       return;
     }
 
-    // Standalone değilse her zaman göster
+    // 2. Standalone modda mı kontrol et
+    const isStandalone =
+      window.matchMedia('(display-mode: standalone)').matches ||
+      (window.navigator as any).standalone === true;
+
+    if (isStandalone) {
+      // Standalone modda açıldıysa kurulmuş demektir — bayrağı kaydet
+      localStorage.setItem(PWA_INSTALLED_KEY, 'true');
+      setShowBanner(false);
+      return;
+    }
+
+    // 3. Kurulmamış ve standalone değil — banner'ı göster
     setShowBanner(true);
 
     // beforeinstallprompt olayını global olarak yakala
-    const handler = (e: Event) => {
+    const beforeInstallHandler = (e: Event) => {
       e.preventDefault();
       deferredPromptRef.current = e;
     };
+    window.addEventListener('beforeinstallprompt', beforeInstallHandler);
 
-    window.addEventListener('beforeinstallprompt', handler);
+    // appinstalled olayını dinle — kurulum tamamlandığında bayrağı kaydet
+    const appInstalledHandler = () => {
+      localStorage.setItem(PWA_INSTALLED_KEY, 'true');
+      setShowBanner(false);
+    };
+    window.addEventListener('appinstalled', appInstalledHandler);
 
-    // Standalone moda geçiş dinle
+    // Standalone moda geçiş dinle (kurulum sonrası)
     const mediaQuery = window.matchMedia('(display-mode: standalone)');
     const standaloneListener = (e: MediaQueryListEvent) => {
       if (e.matches) {
-        setIsStandalone(true);
+        localStorage.setItem(PWA_INSTALLED_KEY, 'true');
         setShowBanner(false);
       }
     };
     mediaQuery.addEventListener('change', standaloneListener);
 
     return () => {
-      window.removeEventListener('beforeinstallprompt', handler);
+      window.removeEventListener('beforeinstallprompt', beforeInstallHandler);
+      window.removeEventListener('appinstalled', appInstalledHandler);
       mediaQuery.removeEventListener('change', standaloneListener);
     };
   }, []);
@@ -68,6 +82,8 @@ export function PwaInstallBanner({ variant }: PwaInstallBannerProps) {
         deferredPromptRef.current.prompt();
         const result = await deferredPromptRef.current.userChoice;
         if (result.outcome === 'accepted') {
+          // Kullanıcı kabul etti — bayrağı kaydet ve banner'ı gizle
+          localStorage.setItem(PWA_INSTALLED_KEY, 'true');
           setShowBanner(false);
         }
       } catch (err) {
@@ -86,8 +102,8 @@ export function PwaInstallBanner({ variant }: PwaInstallBannerProps) {
     }
   };
 
-  // Standalone modda veya gösterilmemesi gerekiyorsa render etme
-  if (isStandalone || !showBanner) return null;
+  // Banner gösterilmeyecekse render etme
+  if (!showBanner) return null;
 
   return (
     <div className="pwa-banner">
