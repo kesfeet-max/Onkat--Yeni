@@ -6,57 +6,57 @@ interface PwaInstallBannerProps {
 
 export function PwaInstallBanner({ variant }: PwaInstallBannerProps) {
   const [showBanner, setShowBanner] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(false);
   const deferredPromptRef = useRef<any>(null);
 
   const content = variant === 'merchant'
     ? {
-        title: '💵 Müşterini Kaçırma! 💰',
-        description: 'QR kodları saniyesinde okutmak için paneli ekrana sabitle.',
-        button: '💸 MASAÜSTÜNE SABİTLE',
+        title: '💵 Esnaf Paneli Her An Elinin Altında Olsun! 💰',
+        description: 'QR kodları saniyesinde okutmak için paneli ekranına ekle.',
+        button: '💸 EKRANIMA EKLE',
       }
     : {
-        title: '💰 Puanların Kaybolmasın! 💸',
-        description: 'Kasada bekleme, Onkatı\'yı tek tıkla ekrana sabitle! 🚀',
-        button: '💵 EKRANA SABİTLE',
+        title: '💰 Puanların Unutulmasın, Gözünün Önünde Olsun! 💸',
+        description: 'Kasada sıra beklemeden puan kazanmak için Onkatı\'yı telefonunun ana ekranına ekle! 🚀',
+        button: '💵 TELEFONA EKLE',
       };
 
   useEffect(() => {
-    // Zaten standalone modda mı?
-    const isStandalone =
+    // Standalone mod kontrolü
+    const standaloneCheck =
       window.matchMedia('(display-mode: standalone)').matches ||
       (window.navigator as any).standalone === true;
 
-    if (isStandalone) {
+    setIsStandalone(standaloneCheck);
+
+    if (standaloneCheck) {
       setShowBanner(false);
       return;
     }
 
-    // Kullanıcı daha önce kapattı mı? (24 saat boyunca gösterme)
-    const dismissed = localStorage.getItem('onkati_pwa_dismissed');
-    if (dismissed) {
-      const dismissedAt = parseInt(dismissed, 10);
-      if (Date.now() - dismissedAt < 24 * 60 * 60 * 1000) {
-        setShowBanner(false);
-        return;
-      }
-    }
+    // Standalone değilse her zaman göster
+    setShowBanner(true);
 
     const handler = (e: Event) => {
       e.preventDefault();
       deferredPromptRef.current = e;
-      setShowBanner(true);
     };
 
     window.addEventListener('beforeinstallprompt', handler);
 
-    // iOS için: beforeinstallprompt olmaz ama yine de banner göster
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-    if (isIOS && !isStandalone) {
-      setTimeout(() => setShowBanner(true), 2000);
-    }
+    // Standalone moda geçiş dinle
+    const mediaQuery = window.matchMedia('(display-mode: standalone)');
+    const standaloneListener = (e: MediaQueryListEvent) => {
+      if (e.matches) {
+        setIsStandalone(true);
+        setShowBanner(false);
+      }
+    };
+    mediaQuery.addEventListener('change', standaloneListener);
 
     return () => {
       window.removeEventListener('beforeinstallprompt', handler);
+      mediaQuery.removeEventListener('change', standaloneListener);
     };
   }, []);
 
@@ -74,7 +74,7 @@ export function PwaInstallBanner({ variant }: PwaInstallBannerProps) {
       deferredPromptRef.current = null;
     } else {
       // iOS - kullanıcıya talimat göster
-      alert('Safari menüsünden "Ana Ekrana Ekle" seçeneğini kullanın.');
+      alert('Safari menüsünden "Ana Ekrana Ekle" (Share → Add to Home Screen) seçeneğini kullanın.');
     }
 
     // Bildirim izni iste
@@ -87,29 +87,20 @@ export function PwaInstallBanner({ variant }: PwaInstallBannerProps) {
     }
   };
 
-  const handleDismiss = () => {
-    setShowBanner(false);
-    localStorage.setItem('onkati_pwa_dismissed', Date.now().toString());
-  };
-
-  if (!showBanner) return null;
+  // Standalone modda veya gösterilmemesi gerekiyorsa render etme
+  if (isStandalone || !showBanner) return null;
 
   return (
     <div className="pwa-banner">
-      <button
-        onClick={handleDismiss}
-        className="pwa-banner-close"
-        aria-label="Kapat"
-      >
-        ✕
-      </button>
-      <div className="pwa-banner-content">
-        <h3 className="pwa-banner-title">{content.title}</h3>
-        <p className="pwa-banner-desc">{content.description}</p>
+      <div className="pwa-banner-inner">
+        <div className="pwa-banner-text">
+          <h3 className="pwa-banner-title">{content.title}</h3>
+          <p className="pwa-banner-desc">{content.description}</p>
+        </div>
+        <button onClick={handleInstall} className="pwa-banner-btn">
+          {content.button}
+        </button>
       </div>
-      <button onClick={handleInstall} className="pwa-banner-btn">
-        {content.button}
-      </button>
     </div>
   );
 }
