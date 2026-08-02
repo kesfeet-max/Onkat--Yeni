@@ -20,6 +20,10 @@ import {
   ArrowUpRight,
   WifiOff,
   RefreshCw,
+  Calendar,
+  ChevronLeft,
+  ChevronRight,
+  ClipboardList,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -69,6 +73,10 @@ export function MerchantPanel() {
   const [cashPointsRate, setCashPointsRate] = useState<number>(7);
   const [cardPointsRate, setCardPointsRate] = useState<number>(5);
   const [savingRate, setSavingRate] = useState(false);
+
+  // Geçmiş Tab — Takvim/Tarih Filtresi
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
 
   // QR Scanner state — Enterprise QR Engine
   const [showScanner, setShowScanner] = useState(false);
@@ -1101,56 +1109,222 @@ export function MerchantPanel() {
         )}
 
         {/* Geçmiş Tab */}
-        {activeTab === 'gecmis' && (
-          <div className="space-y-4">
-            <h2 className="text-lg font-bold text-gray-800">İşlem Geçmişi</h2>
+        {activeTab === 'gecmis' && (() => {
+          // Takvim hesaplamaları
+          const monthStart = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1);
+          const monthEnd = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 0);
+          const startDayOfWeek = monthStart.getDay() === 0 ? 6 : monthStart.getDay() - 1; // Pazartesi başlangıç
+          const daysInMonth = monthEnd.getDate();
 
-            {transactions.length === 0 ? (
-              <div className="bg-white rounded-2xl p-10 text-center shadow-sm border border-gray-100">
-                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <History className="w-8 h-8 text-gray-300" />
-                </div>
-                <p className="text-gray-600 font-medium">Henüz işlem geçmişi yok</p>
+          const turkishMonths = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+          const turkishDays = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'];
+
+          // Seçili güne ait işlemler
+          const filteredTx = transactions.filter(tx => {
+            const txDate = new Date(tx.created_at);
+            return txDate.toDateString() === selectedDate.toDateString();
+          });
+
+          // Günlük özet
+          const dailyEarnTx = filteredTx.filter(t => t.type === 'earn');
+          const dailySpendTx = filteredTx.filter(t => t.type === 'spend');
+          const dailyTotalCiro = dailyEarnTx.reduce((s, t) => s + (t.amount || 0), 0);
+          const dailyTotalEarnPoints = dailyEarnTx.reduce((s, t) => s + (t.points || 0), 0);
+          const dailyTotalSpendPoints = dailySpendTx.reduce((s, t) => s + (t.points || 0), 0);
+          const dailyTxCount = filteredTx.length;
+
+          // Hangi günlerde işlem var (takvimde nokta göstermek için)
+          const daysWithTx = new Set<number>();
+          transactions.forEach(tx => {
+            const txDate = new Date(tx.created_at);
+            if (txDate.getMonth() === calendarMonth.getMonth() && txDate.getFullYear() === calendarMonth.getFullYear()) {
+              daysWithTx.add(txDate.getDate());
+            }
+          });
+
+          const today = new Date();
+          const isToday = (day: number) =>
+            today.getDate() === day &&
+            today.getMonth() === calendarMonth.getMonth() &&
+            today.getFullYear() === calendarMonth.getFullYear();
+
+          const isSelected = (day: number) =>
+            selectedDate.getDate() === day &&
+            selectedDate.getMonth() === calendarMonth.getMonth() &&
+            selectedDate.getFullYear() === calendarMonth.getFullYear();
+
+          const handleDayClick = (day: number) => {
+            setSelectedDate(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), day));
+          };
+
+          const prevMonth = () => {
+            setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1));
+          };
+
+          const nextMonth = () => {
+            const next = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1);
+            if (next <= new Date()) {
+              setCalendarMonth(next);
+            }
+          };
+
+          const goToToday = () => {
+            const now = new Date();
+            setCalendarMonth(new Date(now.getFullYear(), now.getMonth(), 1));
+            setSelectedDate(now);
+          };
+
+          // Takvim grid hücreleri
+          const calendarCells: (number | null)[] = [];
+          for (let i = 0; i < startDayOfWeek; i++) calendarCells.push(null);
+          for (let d = 1; d <= daysInMonth; d++) calendarCells.push(d);
+
+          // Saat formatlayıcı
+          const formatTime = (dateStr: string) => {
+            const d = new Date(dateStr);
+            return d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+          };
+
+          return (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-bold text-gray-800">İşlem Geçmişi</h2>
+                <button
+                  onClick={goToToday}
+                  className="text-xs bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-full font-medium hover:bg-emerald-200 transition"
+                >
+                  Bugün
+                </button>
               </div>
-            ) : (
-              <div className="space-y-2">
-                {transactions.map((tx) => (
-                  <div key={tx.id} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                          tx.type === 'earn'
-                            ? 'bg-gradient-to-br from-emerald-100 to-emerald-200'
-                            : 'bg-gradient-to-br from-orange-100 to-orange-200'
-                        }`}>
-                          {tx.type === 'earn' ? (
-                            <TrendingUp className="w-5 h-5 text-emerald-600" />
-                          ) : (
-                            <Wallet className="w-5 h-5 text-orange-600" />
+
+              {/* Takvim */}
+              <div className="bg-white rounded-2xl shadow-lg p-4 border border-gray-100">
+                {/* Ay navigasyonu */}
+                <div className="flex items-center justify-between mb-3">
+                  <button onClick={prevMonth} className="p-2 rounded-lg hover:bg-gray-100 transition">
+                    <ChevronLeft className="w-5 h-5 text-gray-600" />
+                  </button>
+                  <h3 className="font-bold text-gray-800">
+                    {turkishMonths[calendarMonth.getMonth()]} {calendarMonth.getFullYear()}
+                  </h3>
+                  <button
+                    onClick={nextMonth}
+                    disabled={calendarMonth.getMonth() === today.getMonth() && calendarMonth.getFullYear() === today.getFullYear()}
+                    className="p-2 rounded-lg hover:bg-gray-100 transition disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    <ChevronRight className="w-5 h-5 text-gray-600" />
+                  </button>
+                </div>
+
+                {/* Gün başlıkları */}
+                <div className="grid grid-cols-7 gap-1 mb-1">
+                  {turkishDays.map(day => (
+                    <div key={day} className="text-center text-xs font-medium text-gray-400 py-1">
+                      {day}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Gün hücreleri */}
+                <div className="grid grid-cols-7 gap-1">
+                  {calendarCells.map((day, idx) => (
+                    <button
+                      key={idx}
+                      disabled={day === null}
+                      onClick={() => day && handleDayClick(day)}
+                      className={`relative aspect-square flex flex-col items-center justify-center rounded-lg text-sm font-medium transition ${
+                        day === null
+                          ? 'invisible'
+                          : isSelected(day)
+                            ? 'bg-emerald-600 text-white shadow-md shadow-emerald-200'
+                            : isToday(day)
+                              ? 'bg-emerald-100 text-emerald-800 ring-2 ring-emerald-300'
+                              : 'text-gray-700 hover:bg-gray-100'
+                      }`}
+                    >
+                      {day}
+                      {day && daysWithTx.has(day) && !isSelected(day) && (
+                        <span className="absolute bottom-1 w-1.5 h-1.5 bg-emerald-400 rounded-full" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Günlük Özet Kartları */}
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-white rounded-xl p-3 shadow-sm border border-gray-100 text-center">
+                  <p className="text-xs text-gray-500 mb-0.5">Toplam Ciro</p>
+                  <p className="text-lg font-bold text-gray-800">{formatCurrency(dailyTotalCiro)}</p>
+                </div>
+                <div className="bg-white rounded-xl p-3 shadow-sm border border-gray-100 text-center">
+                  <p className="text-xs text-gray-500 mb-0.5">İşlem Adedi</p>
+                  <p className="text-lg font-bold text-gray-800">{dailyTxCount}</p>
+                </div>
+                <div className="bg-white rounded-xl p-3 shadow-sm border border-emerald-100 text-center">
+                  <p className="text-xs text-emerald-600 mb-0.5">Dağıtılan Puan</p>
+                  <p className="text-lg font-bold text-emerald-700">+{dailyTotalEarnPoints.toFixed(1)}</p>
+                </div>
+                <div className="bg-white rounded-xl p-3 shadow-sm border border-orange-100 text-center">
+                  <p className="text-xs text-orange-600 mb-0.5">Harcanan Puan</p>
+                  <p className="text-lg font-bold text-orange-700">{dailyTotalSpendPoints.toFixed(1)}</p>
+                </div>
+              </div>
+
+              {/* İşlem Listesi */}
+              {filteredTx.length === 0 ? (
+                <div className="bg-white rounded-2xl p-8 text-center shadow-sm border border-gray-100">
+                  <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <ClipboardList className="w-8 h-8 text-gray-300" />
+                  </div>
+                  <p className="text-gray-600 font-medium">Bu tarihte işlem bulunmuyor</p>
+                  <p className="text-gray-400 text-sm mt-1">
+                    {selectedDate.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })}
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs text-gray-500 font-medium px-1">
+                    {selectedDate.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' })} — {filteredTx.length} işlem
+                  </p>
+                  {filteredTx.map((tx) => (
+                    <div key={tx.id} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                            tx.type === 'earn'
+                              ? 'bg-gradient-to-br from-emerald-100 to-emerald-200'
+                              : 'bg-gradient-to-br from-orange-100 to-orange-200'
+                          }`}>
+                            {tx.type === 'earn' ? (
+                              <TrendingUp className="w-5 h-5 text-emerald-600" />
+                            ) : (
+                              <Wallet className="w-5 h-5 text-orange-600" />
+                            )}
+                          </div>
+                          <div>
+                            <p className="font-semibold text-gray-900 text-sm">{tx.customer_name}</p>
+                            <p className="text-xs text-gray-400">{formatTime(tx.created_at)} • {tx.type === 'earn' ? 'Puan Yükleme' : 'Puan Harcama'}</p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className={`font-bold ${
+                            tx.type === 'earn' ? 'text-emerald-600' : 'text-orange-600'
+                          }`}>
+                            {tx.type === 'earn' ? '+' : '-'}{(tx.points || 0).toFixed(2)}
+                          </p>
+                          {tx.type === 'earn' && tx.amount > 0 && (
+                            <p className="text-xs text-gray-400">{formatCurrency(tx.amount)}</p>
                           )}
                         </div>
-                        <div>
-                          <p className="font-semibold text-gray-900 text-sm">{tx.customer_name}</p>
-                          <p className="text-xs text-gray-400">{formatDate(tx.created_at)}</p>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <p className={`font-bold ${
-                          tx.type === 'earn' ? 'text-emerald-600' : 'text-orange-600'
-                        }`}>
-                          {tx.type === 'earn' ? '+' : '-'}{(tx.points || 0).toFixed(2)}
-                        </p>
-                        {tx.type === 'earn' && tx.amount > 0 && (
-                          <p className="text-xs text-gray-400">{formatCurrency(tx.amount)}</p>
-                        )}
                       </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Ayarlar Tab */}
         {activeTab === 'ayarlar' && (
