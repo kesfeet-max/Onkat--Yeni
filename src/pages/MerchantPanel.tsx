@@ -24,11 +24,12 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardList,
+  SwitchCamera,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { supabase } from '../lib/supabase';
 import { formatCurrency, formatDate } from '../lib/utils';
-import { QREngine } from '../lib/qr-engine';
+import { QREngine, CameraFacing, getSavedCameraPreference } from '../lib/qr-engine';
 import { withRetry, resilientRpc, resilientQuery } from '../lib/retry';
 import { toast } from '../lib/toast';
 
@@ -82,6 +83,8 @@ export function MerchantPanel() {
   const [showScanner, setShowScanner] = useState(false);
   const [scannerReady, setScannerReady] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [cameraFacing, setCameraFacing] = useState<CameraFacing>(getSavedCameraPreference());
+  const [switchingCamera, setSwitchingCamera] = useState(false);
   const qrEngineRef = useRef<QREngine | null>(null);
   const scannerContainerRef = useRef<HTMLDivElement>(null);
 
@@ -446,6 +449,7 @@ export function MerchantPanel() {
       elementId: 'merchant-qr-reader',
       fps: 15,
       qrboxSize: 250,
+      facingMode: cameraFacing,
       onScanSuccess: (decodedText: string) => {
         // QR okundu — kamerayı hemen kapat, işlemi başlat
         engine.stop();
@@ -465,8 +469,8 @@ export function MerchantPanel() {
 
     qrEngineRef.current = engine;
 
-    // Kamerayı doğrudan başlat — getUserMedia anında tetiklenir
-    await engine.start();
+    // Kamerayı kayıtlı tercihle başlat — getUserMedia anında tetiklenir
+    await engine.start(cameraFacing);
   }, []);
 
   const stopScanner = useCallback(async () => {
@@ -829,9 +833,41 @@ export function MerchantPanel() {
                   <div className="bg-white rounded-2xl shadow-lg p-4 border border-gray-100">
                     <div className="flex items-center justify-between mb-3">
                       <h3 className="font-bold text-gray-800">QR Tarayıcı</h3>
-                      <button onClick={stopScanner} className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200">
-                        <X className="w-5 h-5 text-gray-600" />
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={async () => {
+                            if (!qrEngineRef.current || switchingCamera) return;
+                            setSwitchingCamera(true);
+                            setScannerReady(false);
+                            try {
+                              const newFacing = await qrEngineRef.current.switchCamera();
+                              setCameraFacing(newFacing);
+                            } catch (err) {
+                              console.warn('Kamera değiştirme hatası:', err);
+                            } finally {
+                              setSwitchingCamera(false);
+                            }
+                          }}
+                          disabled={switchingCamera || !scannerReady}
+                          className="p-2 rounded-lg bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                          title={cameraFacing === 'environment' ? 'Ön kameraya geç' : 'Arka kameraya geç'}
+                        >
+                          {switchingCamera ? (
+                            <Loader2 className="w-5 h-5 text-emerald-600 animate-spin" />
+                          ) : (
+                            <SwitchCamera className="w-5 h-5 text-emerald-600" />
+                          )}
+                        </button>
+                        <button onClick={stopScanner} className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200">
+                          <X className="w-5 h-5 text-gray-600" />
+                        </button>
+                      </div>
+                    </div>
+                    {/* Kamera etiketi */}
+                    <div className="flex items-center justify-center mb-2">
+                      <span className="text-xs font-medium text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
+                        {cameraFacing === 'environment' ? '📷 Arka Kamera' : '🤳 Ön Kamera'}
+                      </span>
                     </div>
                     <div id="merchant-qr-reader" ref={scannerContainerRef} className="rounded-xl overflow-hidden min-h-[280px] bg-black" />
                     {!scannerReady && !cameraError && (

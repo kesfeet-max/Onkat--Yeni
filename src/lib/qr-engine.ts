@@ -6,14 +6,20 @@
  * - navigator.mediaDevices.getUserMedia direkt tetiklenir
  * - Arka plandaki asenkron yüklemeler engellenmez
  * - Bellek sızıntıları önlenir (cleanup garantili)
+ * - Ön/arka kamera geçişi desteklenir (localStorage ile kalıcı tercih)
  */
 
 import { Html5Qrcode, Html5QrcodeScanType, Html5QrcodeSupportedFormats } from 'html5-qrcode';
+
+const CAMERA_PREF_KEY = 'onkati_camera_facing';
+
+export type CameraFacing = 'environment' | 'user';
 
 export interface QREngineConfig {
   elementId: string;
   fps?: number;
   qrboxSize?: number;
+  facingMode?: CameraFacing;
   onScanSuccess: (decodedText: string) => void;
   onScanError?: (error: string) => void;
   onCameraReady?: () => void;
@@ -24,13 +30,28 @@ export class QREngine {
   private scanner: Html5Qrcode | null = null;
   private isRunning = false;
   private config: QREngineConfig;
+  private currentFacing: CameraFacing;
 
   constructor(config: QREngineConfig) {
     this.config = config;
+    // localStorage'dan kayıtlı tercihi oku, yoksa config'den veya 'environment' kullan
+    const savedPref = localStorage.getItem(CAMERA_PREF_KEY) as CameraFacing | null;
+    this.currentFacing = savedPref || config.facingMode || 'environment';
   }
 
-  async start(): Promise<void> {
-    if (this.isRunning) return;
+  getFacing(): CameraFacing {
+    return this.currentFacing;
+  }
+
+  async start(facing?: CameraFacing): Promise<void> {
+    if (this.isRunning) {
+      await this.stop();
+    }
+
+    if (facing) {
+      this.currentFacing = facing;
+      localStorage.setItem(CAMERA_PREF_KEY, facing);
+    }
 
     try {
       // Scanner'ı oluştur — minimal config, hızlı başlangıç
@@ -41,7 +62,7 @@ export class QREngine {
 
       // Kamerayı doğrudan aç — getUserMedia anında tetiklenir
       await this.scanner.start(
-        { facingMode: 'environment' },
+        { facingMode: this.currentFacing },
         {
           fps: this.config.fps || 15,
           qrbox: { width: this.config.qrboxSize || 250, height: this.config.qrboxSize || 250 },
@@ -66,13 +87,25 @@ export class QREngine {
     }
   }
 
-  async stop(): Promise<void> {
-    if (!this.isRunning || !this.scanner) return;
+  /**
+   * Kamerayı değiştir (ön ↔ arka)
+   * Mevcut kamerayı kapatıp yeni yönle tekrar açar.
+   */
+  async switchCamera(): Promise<CameraFacing> {
+    const newFacing: CameraFacing = this.currentFacing === 'environment' ? 'user' : 'environment';
+    await this.start(newFacing);
+    return newFacing;
+  }
 
-    try {
-      await this.scanner.stop();
-    } catch {
-      // Zaten durmuş olabilir
+  async stop(): Promise<void> {
+    if (!this.scanner) return;
+
+    if (this.isRunning) {
+      try {
+        await this.scanner.stop();
+      } catch {
+        // Zaten durmuş olabilir
+      }
     }
 
     try {
@@ -88,6 +121,13 @@ export class QREngine {
   getIsRunning(): boolean {
     return this.isRunning;
   }
+}
+
+/**
+ * Kayıtlı kamera tercihini oku
+ */
+export function getSavedCameraPreference(): CameraFacing {
+  return (localStorage.getItem(CAMERA_PREF_KEY) as CameraFacing) || 'environment';
 }
 
 /**
