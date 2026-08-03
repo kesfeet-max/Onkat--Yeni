@@ -163,7 +163,7 @@ BEGIN
     'rate_used', v_rate,
     'payment_type', p_payment_type,
     'new_balance', v_new_balance,
-    'message', format('%s TL alisveristen %%%.0f oranla %s puan yuklendi', p_amount::text, v_rate, v_points::text)
+    'message', format('%s TL alisveristen %%%s oranla %s puan yuklendi', p_amount::text, round(v_rate)::text, v_points::text)
   );
 END;
 $$;
