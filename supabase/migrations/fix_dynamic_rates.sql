@@ -33,7 +33,12 @@ ALTER TABLE merchants
   ALTER COLUMN card_points_rate SET DEFAULT 5;
 
 -- 3) islem_puan_yukle fonksiyonunu COALESCE olmadan yeniden tanımla
+-- NOT: Eski fonksiyon "auth_user_id" kolonu kullanıyordu (hatalı).
+-- Doğru kolon adı "user_id"dir. Bu DROP + CREATE ile düzeltilir.
 DROP FUNCTION IF EXISTS islem_puan_yukle(UUID, NUMERIC, TEXT, UUID, TEXT);
+DROP FUNCTION IF EXISTS islem_puan_yukle(UUID, NUMERIC, TEXT);
+DROP FUNCTION IF EXISTS islem_puan_yukle(UUID, NUMERIC, TEXT, NUMERIC, NUMERIC);
+DROP FUNCTION IF EXISTS islem_puan_yukle(UUID, NUMERIC, TEXT, UUID, TEXT, NUMERIC, NUMERIC);
 
 CREATE OR REPLACE FUNCTION islem_puan_yukle(
   p_customer_id UUID,
