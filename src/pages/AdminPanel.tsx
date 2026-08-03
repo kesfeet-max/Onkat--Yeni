@@ -17,6 +17,8 @@ import {
   Shield,
   Save,
   MapPin,
+  Loader2,
+  Eye,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { formatCurrency, formatDate } from '../lib/utils';
@@ -57,7 +59,6 @@ interface MerchantData {
   created_at: string;
   latitude?: number;
   longitude?: number;
-  points_rate?: number;
 }
 
 interface TransactionData {
@@ -94,9 +95,11 @@ export function AdminPanel() {
     total_revenue: 0,
     latitude: 0,
     longitude: 0,
-    points_rate: 7,
   });
   const [saving, setSaving] = useState(false);
+  const [detailMerchant, setDetailMerchant] = useState<MerchantData | null>(null);
+  const [merchantTransactions, setMerchantTransactions] = useState<TransactionData[]>([]);
+  const [loadingDetail, setLoadingDetail] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -197,13 +200,35 @@ export function AdminPanel() {
     }
   };
 
+  const openMerchantDetail = async (merchant: MerchantData) => {
+    setDetailMerchant(merchant);
+    setLoadingDetail(true);
+    setMerchantTransactions([]);
+    try {
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('id, type, amount, points, status, created_at, customers(full_name, phone), merchants(store_name, store_id)')
+        .eq('merchant_id', merchant.id)
+        .eq('status', 'completed')
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (!error && data) {
+        setMerchantTransactions(data as unknown as TransactionData[]);
+      }
+    } catch (err) {
+      console.error('Error fetching merchant transactions:', err);
+    } finally {
+      setLoadingDetail(false);
+    }
+  };
+
   const openEditMerchant = (merchant: MerchantData) => {
     setEditingMerchant(merchant);
     setEditForm({
       total_revenue: merchant.total_revenue || 0,
       latitude: merchant.latitude || 0,
       longitude: merchant.longitude || 0,
-      points_rate: merchant.points_rate || 7,
     });
   };
 
@@ -218,7 +243,6 @@ export function AdminPanel() {
           total_revenue: editForm.total_revenue,
           latitude: editForm.latitude,
           longitude: editForm.longitude,
-          points_rate: editForm.points_rate,
           updated_at: new Date().toISOString(),
         })
         .eq('id', editingMerchant.id);
@@ -405,7 +429,6 @@ export function AdminPanel() {
                         </div>
                         <div className="text-right">
                           <p className="font-semibold text-primary-600">{formatCurrency(merchant.total_revenue)}</p>
-                          <p className="text-xs text-gray-500">Puan: %{merchant.points_rate || 7}</p>
                         </div>
                       </div>
                     ))}
@@ -502,7 +525,6 @@ export function AdminPanel() {
                         <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">E-posta</th>
                         <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Konum</th>
                         <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Ciro</th>
-                        <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Puan Oranı</th>
                         <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Durum</th>
                         <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">İşlemler</th>
                       </tr>
@@ -526,7 +548,6 @@ export function AdminPanel() {
                             </div>
                           </td>
                           <td className="px-4 py-3 text-sm font-semibold text-primary-600">{formatCurrency(merchant.total_revenue)}</td>
-                          <td className="px-4 py-3 text-sm font-medium text-gray-900">%{merchant.points_rate || 7}</td>
                           <td className="px-4 py-3">
                             <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                               merchant.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
@@ -536,6 +557,13 @@ export function AdminPanel() {
                           </td>
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => openMerchantDetail(merchant)}
+                                className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                                title="İşlem Geçmişi"
+                              >
+                                <Eye className="w-4 h-4" />
+                              </button>
                               <button
                                 onClick={() => openEditMerchant(merchant)}
                                 className="p-1.5 text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded transition-colors"
@@ -655,6 +683,86 @@ export function AdminPanel() {
         )}
       </div>
 
+      {/* Merchant Detail Modal */}
+      {detailMerchant && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between p-6 border-b border-gray-100">
+              <div>
+                <h3 className="text-xl font-heading font-bold text-gray-900">{detailMerchant.store_name}</h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  {detailMerchant.city} / {detailMerchant.district} • No: {detailMerchant.store_id}
+                </p>
+              </div>
+              <button
+                onClick={() => setDetailMerchant(null)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* Özet Kartları */}
+            <div className="grid grid-cols-3 gap-3 p-6 border-b border-gray-100">
+              <div className="bg-primary-50 rounded-xl p-3 text-center">
+                <p className="text-xs text-primary-600 font-medium">Toplam Ciro</p>
+                <p className="text-lg font-bold text-primary-700">{formatCurrency(detailMerchant.total_revenue)}</p>
+              </div>
+              <div className="bg-green-50 rounded-xl p-3 text-center">
+                <p className="text-xs text-green-600 font-medium">Dağıtılan Puan</p>
+                <p className="text-lg font-bold text-green-700">{detailMerchant.total_points_distributed} TL</p>
+              </div>
+              <div className="bg-blue-50 rounded-xl p-3 text-center">
+                <p className="text-xs text-blue-600 font-medium">Müşteri Sayısı</p>
+                <p className="text-lg font-bold text-blue-700">{detailMerchant.total_customers}</p>
+              </div>
+            </div>
+
+            {/* İşlem Geçmişi */}
+            <div className="flex-1 overflow-y-auto p-6">
+              <h4 className="text-sm font-semibold text-gray-700 mb-3">İşlem Geçmişi (Son 50)</h4>
+              {loadingDetail ? (
+                <div className="flex items-center justify-center py-10">
+                  <Loader2 className="w-6 h-6 animate-spin text-primary-600" />
+                </div>
+              ) : merchantTransactions.length === 0 ? (
+                <div className="text-center py-10 text-gray-400">
+                  <QrCode className="w-10 h-10 mx-auto mb-2 opacity-40" />
+                  <p className="text-sm">Henüz işlem bulunmuyor</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-medium text-gray-600">Tarih / Saat</th>
+                        <th className="px-3 py-2 text-left font-medium text-gray-600">İşlem Tutarı (Ciro)</th>
+                        <th className="px-3 py-2 text-left font-medium text-gray-600">Dağıtılan Puan</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {merchantTransactions.map(tx => (
+                        <tr key={tx.id} className="hover:bg-gray-50">
+                          <td className="px-3 py-2.5 text-gray-700">{formatDate(tx.created_at)}</td>
+                          <td className="px-3 py-2.5 font-medium text-gray-900">{formatCurrency(tx.amount)}</td>
+                          <td className="px-3 py-2.5">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                              tx.type === 'earn' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
+                            }`}>
+                              {tx.type === 'earn' ? '+' : '-'}{tx.points} TL
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Edit Merchant Modal */}
       {editingMerchant && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
@@ -714,20 +822,6 @@ export function AdminPanel() {
                   onChange={(e) => setEditForm({ ...editForm, longitude: parseFloat(e.target.value) || 0 })}
                   className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-primary-500"
                   step="0.000001"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Puan Oranı (%)
-                </label>
-                <input
-                  type="number"
-                  value={editForm.points_rate}
-                  onChange={(e) => setEditForm({ ...editForm, points_rate: parseInt(e.target.value) || 7 })}
-                  className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-primary-500"
-                  min="1"
-                  max="25"
                 />
               </div>
 

@@ -262,14 +262,13 @@ $$;
 --    auth.uid() kasiyerin user_id'si olmalı.
 -- ============================================================
 DROP FUNCTION IF EXISTS kasiyer_puan_yukle(UUID, UUID, NUMERIC, TEXT, NUMERIC, NUMERIC);
+DROP FUNCTION IF EXISTS kasiyer_puan_yukle(UUID, UUID, NUMERIC, TEXT);
 
 CREATE OR REPLACE FUNCTION kasiyer_puan_yukle(
   p_cashier_id UUID,
   p_customer_id UUID,
   p_amount NUMERIC,
-  p_payment_type TEXT DEFAULT 'cash',
-  p_cash_rate NUMERIC DEFAULT 7,
-  p_card_rate NUMERIC DEFAULT 5
+  p_payment_type TEXT DEFAULT 'cash'
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -285,6 +284,8 @@ DECLARE
   v_tx_id UUID;
   v_settings RECORD;
   v_current_hour INTEGER;
+  v_db_cash_rate NUMERIC;
+  v_db_card_rate NUMERIC;
 BEGIN
   -- Kasiyeri doğrula (çağıran kullanıcı bu kasiyere sahip mi?)
   SELECT c.id, c.merchant_id, c.full_name, c.is_active
@@ -301,14 +302,20 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'Kasiyer hesabi pasif durumda');
   END IF;
 
-  -- Esnafı bul
-  SELECT id, store_name, is_active INTO v_merchant
+  -- Esnafı bul + güncel oranları al
+  SELECT id, store_name, is_active,
+         COALESCE(cash_points_rate, 7) AS cash_points_rate,
+         COALESCE(card_points_rate, 5) AS card_points_rate
+  INTO v_merchant
   FROM merchants
   WHERE id = v_cashier.merchant_id;
 
   IF NOT v_merchant.is_active THEN
     RETURN jsonb_build_object('success', false, 'error', 'Magaza hesabi aktif degil');
   END IF;
+
+  v_db_cash_rate := v_merchant.cash_points_rate;
+  v_db_card_rate := v_merchant.card_points_rate;
 
   -- Mesai kontrolü
   SELECT * INTO v_settings
@@ -348,11 +355,11 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'Tutar sifirdan buyuk olmali');
   END IF;
 
-  -- Oran belirle
+  -- Oran: HER ZAMAN veritabanından okunan güncel oran kullanılır
   IF p_payment_type = 'card' THEN
-    v_rate := p_card_rate;
+    v_rate := v_db_card_rate;
   ELSE
-    v_rate := p_cash_rate;
+    v_rate := v_db_cash_rate;
   END IF;
 
   v_points := ROUND(p_amount * v_rate / 100, 2);
@@ -614,16 +621,17 @@ END;
 $$;
 
 -- ============================================================
--- 12. islem_puan_yukle — esnaf kendisi işlem yaparken (mevcut davranış korunur)
+-- 12. islem_puan_yukle — esnaf kendisi işlem yaparken
+--     ORAN: Her zaman merchants tablosundan güncel oran okunur.
+--     Frontend'den gelen p_cash_rate/p_card_rate parametreleri KALDIRILDI.
 -- ============================================================
 DROP FUNCTION IF EXISTS islem_puan_yukle(UUID, NUMERIC, TEXT, NUMERIC, NUMERIC, UUID, TEXT);
+DROP FUNCTION IF EXISTS islem_puan_yukle(UUID, NUMERIC, TEXT, UUID, TEXT);
 
 CREATE OR REPLACE FUNCTION islem_puan_yukle(
   p_customer_id UUID,
   p_amount NUMERIC,
   p_payment_type TEXT DEFAULT 'cash',
-  p_cash_rate NUMERIC DEFAULT 7,
-  p_card_rate NUMERIC DEFAULT 5,
   p_cashier_id UUID DEFAULT NULL,
   p_cashier_name TEXT DEFAULT NULL
 )
@@ -640,9 +648,13 @@ DECLARE
   v_tx_id UUID;
   v_settings RECORD;
   v_current_hour INTEGER;
+  v_db_cash_rate NUMERIC;
+  v_db_card_rate NUMERIC;
 BEGIN
-  -- Esnafı bul
-  SELECT id, store_id, store_name, is_active
+  -- Esnafı bul + güncel oranları veritabanından oku
+  SELECT id, store_id, store_name, is_active,
+         COALESCE(cash_points_rate, 7) AS cash_points_rate,
+         COALESCE(card_points_rate, 5) AS card_points_rate
   INTO v_merchant
   FROM merchants
   WHERE user_id = auth.uid()
@@ -655,6 +667,10 @@ BEGIN
   IF NOT v_merchant.is_active THEN
     RETURN jsonb_build_object('success', false, 'error', 'Magaza hesabi aktif degil');
   END IF;
+
+  -- Veritabanındaki güncel oranları al (esnaf en son ne kaydettiyse O kullanılır)
+  v_db_cash_rate := v_merchant.cash_points_rate;
+  v_db_card_rate := v_merchant.card_points_rate;
 
   -- Mesai kontrolü
   SELECT * INTO v_settings
@@ -692,10 +708,11 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'Tutar sifirdan buyuk olmali');
   END IF;
 
+  -- ORAN: HER ZAMAN veritabanından okunan güncel oran kullanılır
   IF p_payment_type = 'card' THEN
-    v_rate := p_card_rate;
+    v_rate := v_db_card_rate;
   ELSE
-    v_rate := p_cash_rate;
+    v_rate := v_db_cash_rate;
   END IF;
 
   v_points := ROUND(p_amount * v_rate / 100, 2);
@@ -844,11 +861,11 @@ GRANT EXECUTE ON FUNCTION kasiyer_ekle(TEXT, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION kasiyer_listele() TO authenticated;
 GRANT EXECUTE ON FUNCTION kasiyer_durum_degistir(UUID, BOOLEAN) TO authenticated;
 GRANT EXECUTE ON FUNCTION kasiyer_yetki_kontrol() TO authenticated;
-GRANT EXECUTE ON FUNCTION kasiyer_puan_yukle(UUID, UUID, NUMERIC, TEXT, NUMERIC, NUMERIC) TO authenticated;
+GRANT EXECUTE ON FUNCTION kasiyer_puan_yukle(UUID, UUID, NUMERIC, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION kasiyer_puan_harca(UUID, UUID, NUMERIC) TO authenticated;
 GRANT EXECUTE ON FUNCTION magaza_ayar_kaydet(BOOLEAN, BOOLEAN, TEXT, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION magaza_ayar_getir() TO authenticated;
-GRANT EXECUTE ON FUNCTION islem_puan_yukle(UUID, NUMERIC, TEXT, NUMERIC, NUMERIC, UUID, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION islem_puan_yukle(UUID, NUMERIC, TEXT, UUID, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION islem_puan_harca(UUID, NUMERIC, UUID, TEXT) TO authenticated;
 
 COMMIT;

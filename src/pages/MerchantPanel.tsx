@@ -366,8 +366,12 @@ export function MerchantPanel() {
 
       if (!rpcError && rpcData && (rpcData as any).success) {
         const r = rpcData as any;
-        setCashPointsRate(Number(r.cash_points_rate) || 7);
-        setCardPointsRate(Number(r.card_points_rate) || 5);
+        // DB'den dönen değeri doğrudan kullan — COALESCE zaten default sağlıyor
+        setCashPointsRate(Number(r.cash_points_rate));
+        setCardPointsRate(Number(r.card_points_rate));
+        // localStorage'ı da senkronize et (offline erişim için)
+        localStorage.setItem('onkati_cash_rate', String(r.cash_points_rate));
+        localStorage.setItem('onkati_card_rate', String(r.card_points_rate));
         return;
       }
 
@@ -379,8 +383,16 @@ export function MerchantPanel() {
         .single();
 
       if (!error && data) {
-        if ((data as any).cash_points_rate != null) setCashPointsRate(Number((data as any).cash_points_rate));
-        if ((data as any).card_points_rate != null) setCardPointsRate(Number((data as any).card_points_rate));
+        const dbCash = (data as any).cash_points_rate;
+        const dbCard = (data as any).card_points_rate;
+        if (dbCash != null) {
+          setCashPointsRate(Number(dbCash));
+          localStorage.setItem('onkati_cash_rate', String(dbCash));
+        }
+        if (dbCard != null) {
+          setCardPointsRate(Number(dbCard));
+          localStorage.setItem('onkati_card_rate', String(dbCard));
+        }
       } else {
         // Fallback: localStorage'dan oku (migration henüz çalışmamışsa)
         const savedCash = localStorage.getItem('onkati_cash_rate');
@@ -389,7 +401,7 @@ export function MerchantPanel() {
         if (savedCard) setCardPointsRate(parseFloat(savedCard));
       }
     } catch {
-      // Fallback: localStorage
+      // Fallback: localStorage (ağ hatası durumunda)
       const savedCash = localStorage.getItem('onkati_cash_rate');
       const savedCard = localStorage.getItem('onkati_card_rate');
       if (savedCash) setCashPointsRate(parseFloat(savedCash));
@@ -696,8 +708,6 @@ export function MerchantPanel() {
         p_customer_id: customerInfo.customer_id,
         p_amount: numAmount,
         p_payment_type: paymentType,
-        p_cash_rate: cashPointsRate,
-        p_card_rate: cardPointsRate,
         p_cashier_id: activeCashier?.id || null,
         p_cashier_name: activeCashier?.full_name || null,
       }, {
