@@ -35,10 +35,26 @@ ALTER TABLE merchants
 -- 3) islem_puan_yukle fonksiyonunu COALESCE olmadan yeniden tanımla
 -- NOT: Eski fonksiyon "auth_user_id" kolonu kullanıyordu (hatalı).
 -- Doğru kolon adı "user_id"dir. Bu DROP + CREATE ile düzeltilir.
+-- Ayrıca birden fazla overload varsa hepsini temizliyoruz (ambiguity hatası önlenir).
 DROP FUNCTION IF EXISTS islem_puan_yukle(UUID, NUMERIC, TEXT, UUID, TEXT);
 DROP FUNCTION IF EXISTS islem_puan_yukle(UUID, NUMERIC, TEXT);
 DROP FUNCTION IF EXISTS islem_puan_yukle(UUID, NUMERIC, TEXT, NUMERIC, NUMERIC);
 DROP FUNCTION IF EXISTS islem_puan_yukle(UUID, NUMERIC, TEXT, UUID, TEXT, NUMERIC, NUMERIC);
+
+-- Dinamik olarak kalan tüm overload'ları sil
+DO $$
+DECLARE
+  r RECORD;
+BEGIN
+  FOR r IN
+    SELECT oid::regprocedure::text AS func_sig
+    FROM pg_proc
+    WHERE proname = 'islem_puan_yukle'
+      AND pronamespace = 'public'::regnamespace
+  LOOP
+    EXECUTE 'DROP FUNCTION IF EXISTS ' || r.func_sig || ' CASCADE';
+  END LOOP;
+END $$;
 
 CREATE OR REPLACE FUNCTION islem_puan_yukle(
   p_customer_id UUID,
@@ -171,7 +187,23 @@ END;
 $$;
 
 -- 4) kasiyer_puan_yukle fonksiyonunu COALESCE olmadan yeniden tanımla
+-- Tüm olası overload'ları temizle
 DROP FUNCTION IF EXISTS kasiyer_puan_yukle(UUID, UUID, NUMERIC, TEXT);
+DROP FUNCTION IF EXISTS kasiyer_puan_yukle(UUID, UUID, NUMERIC, TEXT, NUMERIC, NUMERIC);
+
+DO $$
+DECLARE
+  r RECORD;
+BEGIN
+  FOR r IN
+    SELECT oid::regprocedure::text AS func_sig
+    FROM pg_proc
+    WHERE proname = 'kasiyer_puan_yukle'
+      AND pronamespace = 'public'::regnamespace
+  LOOP
+    EXECUTE 'DROP FUNCTION IF EXISTS ' || r.func_sig || ' CASCADE';
+  END LOOP;
+END $$;
 
 CREATE OR REPLACE FUNCTION kasiyer_puan_yukle(
   p_cashier_id UUID,

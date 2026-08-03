@@ -1,21 +1,43 @@
 -- =====================================================
--- HOTFIX: "column auth_user_id does not exist" hatası
+-- HOTFIX: "Could not choose the best candidate function" hatası
 -- =====================================================
--- Sorun: Supabase'de deploy edilmiş islem_puan_yukle fonksiyonu
--- merchants tablosunda "auth_user_id" kolonu arıyor ama doğru kolon adı "user_id".
+-- Sorun: Supabase'de aynı isimle birden fazla islem_puan_yukle fonksiyonu var.
+-- PostgreSQL named parameters ile çağrıldığında hangisini seçeceğini bilemiyor.
+--
+-- Çözüm: TÜM eski fonksiyonları sil, sadece tek bir doğru versiyon bırak.
 --
 -- Bu dosyayı Supabase Dashboard > SQL Editor'da çalıştırın.
--- (fix_dynamic_rates.sql'in tamamını çalıştırmak da aynı işi görür)
 -- =====================================================
 
 BEGIN;
 
--- Eski fonksiyon imzalarını temizle (hangi imzayla oluşturulmuş olursa olsun)
+-- ============================================================
+-- 1) TÜM MEVCUT islem_puan_yukle OVERLOAD'LARINI SİL
+-- ============================================================
+-- Olası tüm imzaları tek tek DROP et
 DROP FUNCTION IF EXISTS islem_puan_yukle(UUID, NUMERIC, TEXT, UUID, TEXT);
 DROP FUNCTION IF EXISTS islem_puan_yukle(UUID, NUMERIC, TEXT);
 DROP FUNCTION IF EXISTS islem_puan_yukle(UUID, NUMERIC, TEXT, NUMERIC, NUMERIC);
 DROP FUNCTION IF EXISTS islem_puan_yukle(UUID, NUMERIC, TEXT, UUID, TEXT, NUMERIC, NUMERIC);
 
+-- Cascade ile kalan varsa onu da temizle (fonksiyon adına göre)
+DO $$
+DECLARE
+  r RECORD;
+BEGIN
+  FOR r IN
+    SELECT oid::regprocedure::text AS func_sig
+    FROM pg_proc
+    WHERE proname = 'islem_puan_yukle'
+      AND pronamespace = 'public'::regnamespace
+  LOOP
+    EXECUTE 'DROP FUNCTION IF EXISTS ' || r.func_sig || ' CASCADE';
+  END LOOP;
+END $$;
+
+-- ============================================================
+-- 2) TEK BİR DOĞRU FONKSİYON OLUŞTUR
+-- ============================================================
 CREATE OR REPLACE FUNCTION islem_puan_yukle(
   p_customer_id UUID,
   p_amount NUMERIC,
@@ -146,7 +168,9 @@ BEGIN
 END;
 $$;
 
--- GRANT
+-- ============================================================
+-- 3) GRANT
+-- ============================================================
 GRANT EXECUTE ON FUNCTION islem_puan_yukle(UUID, NUMERIC, TEXT, UUID, TEXT) TO authenticated;
 
 COMMIT;
