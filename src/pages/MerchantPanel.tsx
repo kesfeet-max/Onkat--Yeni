@@ -364,14 +364,17 @@ export function MerchantPanel() {
       // Önce RPC ile dene (migration çalışmışsa)
       const { data: rpcData, error: rpcError } = await supabase.rpc('esnaf_oran_getir');
 
-      if (!rpcError && rpcData && (rpcData as any).success) {
+      if (!rpcError && rpcData && (rpcData as any).success === true) {
         const r = rpcData as any;
-        // DB'den dönen değeri doğrudan kullan — COALESCE zaten default sağlıyor
-        setCashPointsRate(Number(r.cash_points_rate));
-        setCardPointsRate(Number(r.card_points_rate));
+        const dbCashRate = Number(r.cash_points_rate);
+        const dbCardRate = Number(r.card_points_rate);
+        // DB'den dönen değeri doğrudan kullan
+        setCashPointsRate(dbCashRate);
+        setCardPointsRate(dbCardRate);
         // localStorage'ı da senkronize et (offline erişim için)
-        localStorage.setItem('onkati_cash_rate', String(r.cash_points_rate));
-        localStorage.setItem('onkati_card_rate', String(r.card_points_rate));
+        localStorage.setItem('onkati_cash_rate', String(dbCashRate));
+        localStorage.setItem('onkati_card_rate', String(dbCardRate));
+        console.log(`[Oran] DB'den okundu: Nakit %${dbCashRate}, Kart %${dbCardRate}`);
         return;
       }
 
@@ -393,19 +396,22 @@ export function MerchantPanel() {
           setCardPointsRate(Number(dbCard));
           localStorage.setItem('onkati_card_rate', String(dbCard));
         }
+        console.log(`[Oran] Tablo'dan okundu: Nakit %${dbCash}, Kart %${dbCard}`);
       } else {
         // Fallback: localStorage'dan oku (migration henüz çalışmamışsa)
         const savedCash = localStorage.getItem('onkati_cash_rate');
         const savedCard = localStorage.getItem('onkati_card_rate');
         if (savedCash) setCashPointsRate(parseFloat(savedCash));
         if (savedCard) setCardPointsRate(parseFloat(savedCard));
+        console.warn('[Oran] DB okunamadı, localStorage fallback kullanılıyor');
       }
-    } catch {
+    } catch (err) {
       // Fallback: localStorage (ağ hatası durumunda)
       const savedCash = localStorage.getItem('onkati_cash_rate');
       const savedCard = localStorage.getItem('onkati_card_rate');
       if (savedCash) setCashPointsRate(parseFloat(savedCash));
       if (savedCard) setCardPointsRate(parseFloat(savedCard));
+      console.error('[Oran] Ağ hatası, localStorage fallback:', err);
     }
   };
 
@@ -419,14 +425,21 @@ export function MerchantPanel() {
         p_card_rate: cardPointsRate,
       });
 
-      if (!rpcError && rpcResult) {
-        // RPC başarılı
+      if (!rpcError && rpcResult && (rpcResult as any).success === true) {
+        // RPC başarılı — DB'ye yazıldı
         localStorage.setItem('onkati_cash_rate', cashPointsRate.toString());
         localStorage.setItem('onkati_card_rate', cardPointsRate.toString());
-        setMessage({ type: 'success', text: 'Puan oranları kaydedildi!' });
+        setMessage({ type: 'success', text: 'Puan oranları veritabanına kaydedildi!' });
         toast.success('Puan oranları başarıyla güncellendi!');
+      } else if (!rpcError && rpcResult && (rpcResult as any).success === false) {
+        // RPC çalıştı ama iş mantığı hatası döndü
+        const errMsg = (rpcResult as any).error || 'Bilinmeyen hata';
+        console.error('esnaf_oran_kaydet iş mantığı hatası:', errMsg);
+        setMessage({ type: 'error', text: `Kaydetme başarısız: ${errMsg}` });
+        toast.error(`Oran kaydedilemedi: ${errMsg}`);
       } else {
-        // RPC yoksa doğrudan update dene
+        // RPC yoksa veya hata döndüyse doğrudan update dene
+        console.warn('esnaf_oran_kaydet RPC kullanılamıyor, doğrudan update deneniyor...', rpcError?.message);
         const { error } = await supabase
           .from('merchants')
           .update({
@@ -436,14 +449,13 @@ export function MerchantPanel() {
           .eq('user_id', user.id);
 
         if (error) {
-          // Kolon yoksa localStorage'a kaydet ve kullanıcıyı bilgilendir
           console.error('Puan oranı kaydetme hatası:', error);
           if (error.message.includes('column') || error.message.includes('could not find')) {
             // Kolon henüz eklenmemiş — localStorage'a kaydet, çalışmaya devam et
             localStorage.setItem('onkati_cash_rate', cashPointsRate.toString());
             localStorage.setItem('onkati_card_rate', cardPointsRate.toString());
-            setMessage({ type: 'success', text: 'Puan oranları cihaza kaydedildi (veritabanı güncelleniyor).' });
-            toast.success('Oranlar kaydedildi', 'Cihaz hafızasına kaydedildi');
+            setMessage({ type: 'error', text: 'Veritabanı henüz hazır değil — oranlar cihaza kaydedildi. Lütfen yöneticinize başvurun.' });
+            toast.error('DB hazır değil — cihaza kaydedildi');
           } else {
             setMessage({ type: 'error', text: 'Kaydetme başarısız: ' + error.message });
             toast.error('Puan oranları kaydedilemedi!');
@@ -451,19 +463,18 @@ export function MerchantPanel() {
         } else {
           localStorage.setItem('onkati_cash_rate', cashPointsRate.toString());
           localStorage.setItem('onkati_card_rate', cardPointsRate.toString());
-          setMessage({ type: 'success', text: 'Puan oranları kaydedildi!' });
+          setMessage({ type: 'success', text: 'Puan oranları veritabanına kaydedildi!' });
           toast.success('Puan oranları başarıyla güncellendi!');
         }
       }
     } catch (err: any) {
       console.error('Puan oranı kaydetme hatası:', err);
-      // Network hatası durumunda bile localStorage'a kaydet
-      localStorage.setItem('onkati_cash_rate', cashPointsRate.toString());
-      localStorage.setItem('onkati_card_rate', cardPointsRate.toString());
-      setMessage({ type: 'error', text: 'Bağlantı hatası — oranlar cihaza kaydedildi.' });
-      toast.error('Bağlantı hatası!');
+      setMessage({ type: 'error', text: 'Bağlantı hatası — oranlar kaydedilemedi. İnternet bağlantınızı kontrol edin.' });
+      toast.error('Bağlantı hatası — oranlar kaydedilemedi!');
     }
-    setTimeout(() => setMessage(null), 3000);
+    // Kayıt sonrası state'i DB'den taze oku — sayfa yenilenmeden yeni oran geçerli olsun
+    await fetchMerchantSettings();
+    setTimeout(() => setMessage(null), 4000);
     setSavingRate(false);
   };
 
@@ -730,8 +741,9 @@ export function MerchantPanel() {
       }
 
       setLastResult(r);
-      setMessage({ type: 'success', text: `${numAmount} TL → ${r.points} puan yüklendi!` });
-      toast.success('Puan Yüklendi!', `${r.points} puan başarıyla eklendi`);
+      const rateInfo = r.rate_used ? ` (%${r.rate_used} oran)` : '';
+      setMessage({ type: 'success', text: `${numAmount} TL → ${r.points} puan yüklendi!${rateInfo}` });
+      toast.success('Puan Yüklendi!', `${r.points} puan başarıyla eklendi${rateInfo}`);
       setCustomerInfo(prev => prev ? { ...prev, store_balance: r.new_balance } : null);
       setAmount('');
       setActionMode('idle');
