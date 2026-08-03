@@ -23,6 +23,7 @@ import {
 import { useAuth } from '../auth/AuthContext';
 import { supabase } from '../lib/supabase';
 import { formatCurrency, formatDate } from '../lib/utils';
+import { QREngine, CameraFacing, getSavedCameraPreference } from '../lib/qr-engine';
 import QRCode from 'qrcode';
 
 type TabType = 'qr' | 'esnaflar' | 'gecmis';
@@ -89,12 +90,11 @@ export function CustomerPanel() {
   const [cashierAction, setCashierAction] = useState<'earn' | 'spend'>('earn');
   const [cashierProcessing, setCashierProcessing] = useState(false);
   const [cashierResult, setCashierResult] = useState<any>(null);
-  const [cashierFacingMode, setCashierFacingMode] = useState<'environment' | 'user'>(
-    () => (localStorage.getItem('onkati_cashier_camera_facing') as 'environment' | 'user') || 'environment'
-  );
+  const [cashierFacingMode, setCashierFacingMode] = useState<CameraFacing>(getSavedCameraPreference());
   const [switchingCashierCamera, setSwitchingCashierCamera] = useState(false);
-  const scannerRef = useRef<any>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const [cashierScannerReady, setCashierScannerReady] = useState(false);
+  const [cashierCameraError, setCashierCameraError] = useState<string | null>(null);
+  const cashierQrEngineRef = useRef<QREngine | null>(null);
 
   const customer = profile as any;
 
@@ -114,6 +114,16 @@ export function CustomerPanel() {
 
     loadData();
   }, [authLoading, user, customer?.id, navigate]);
+
+  // Kasiyer QR Engine cleanup — component unmount veya kasiyer modu kapatıldığında
+  useEffect(() => {
+    return () => {
+      if (cashierQrEngineRef.current) {
+        cashierQrEngineRef.current.stop();
+        cashierQrEngineRef.current = null;
+      }
+    };
+  }, []);
 
   const loadData = async () => {
     try {
@@ -330,145 +340,71 @@ export function CustomerPanel() {
 
   // ============ KASİYER MODU FONKSİYONLARI ============
 
-  const startCashierScanner = async (facingOverride?: 'environment' | 'user') => {
+  const startCashierScanner = useCallback(async () => {
     setCashierScanning(true);
     setCashierCustomer(null);
     setCashierResult(null);
+    setCashierScannerReady(false);
+    setCashierCameraError(null);
 
-    const facing = facingOverride || cashierFacingMode;
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: facing },
-      });
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
-      }
-
-      // BarcodeDetector API kullan (modern tarayıcılar)
-      if ('BarcodeDetector' in window) {
-        const detector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
-        scannerRef.current = setInterval(async () => {
-          if (!videoRef.current) return;
-          try {
-            const barcodes = await detector.detect(videoRef.current);
-            if (barcodes.length > 0) {
-              handleCashierQRResult(barcodes[0].rawValue);
-            }
-          } catch {
-            // Frame okuma hatası — devam
-          }
-        }, 300);
-      } else {
-        // Fallback: html5-qrcode import
-        const { Html5Qrcode } = await import('html5-qrcode');
-        const scanner = new Html5Qrcode('cashier-qr-reader');
-        scannerRef.current = scanner;
-        await scanner.start(
-          { facingMode: facing },
-          { fps: 10, qrbox: { width: 250, height: 250 } },
-          (decodedText: string) => {
-            handleCashierQRResult(decodedText);
-          },
-          () => {}
-        );
-      }
-    } catch (err) {
-      console.error('Camera error:', err);
-      setCashierScanning(false);
-    }
-  };
-
-  const stopCashierScanner = () => {
-    if (scannerRef.current) {
-      if (typeof scannerRef.current === 'number') {
-        clearInterval(scannerRef.current);
-      } else if (scannerRef.current.stop) {
-        scannerRef.current.stop().catch(() => {});
-      }
-      scannerRef.current = null;
+    // Eski engine varsa temizle
+    if (cashierQrEngineRef.current) {
+      await cashierQrEngineRef.current.stop();
+      cashierQrEngineRef.current = null;
     }
 
-    if (videoRef.current && videoRef.current.srcObject) {
-      const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
-      tracks.forEach((t) => t.stop());
-      videoRef.current.srcObject = null;
-    }
+    // DOM element'in mount olmasını bekle (1 frame)
+    await new Promise(r => requestAnimationFrame(r));
 
+    const engine = new QREngine({
+      elementId: 'cashier-qr-reader',
+      fps: 15,
+      qrboxSize: 250,
+      onScanSuccess: (decodedText: string) => {
+        // QR okundu — kamerayı hemen kapat, işlemi başlat
+        engine.stop();
+        setCashierScanning(false);
+        setCashierScannerReady(false);
+        handleCashierQRResult(decodedText);
+      },
+      onCameraReady: () => {
+        setCashierScannerReady(true);
+      },
+      onCameraError: (error: string) => {
+        setCashierCameraError(error);
+        setCashierScannerReady(false);
+      },
+    });
+
+    cashierQrEngineRef.current = engine;
+    await engine.start(cashierFacingMode);
+  }, [cashierFacingMode]);
+
+  const stopCashierScanner = useCallback(async () => {
+    if (cashierQrEngineRef.current) {
+      await cashierQrEngineRef.current.stop();
+      cashierQrEngineRef.current = null;
+    }
     setCashierScanning(false);
-  };
+    setCashierScannerReady(false);
+    setCashierCameraError(null);
+  }, []);
 
-  const switchCashierCamera = async () => {
+  const switchCashierCamera = useCallback(async () => {
+    if (!cashierQrEngineRef.current || switchingCashierCamera) return;
     setSwitchingCashierCamera(true);
+    setCashierScannerReady(false);
     try {
-      // Mevcut kamerayı durdur
-      if (scannerRef.current) {
-        if (typeof scannerRef.current === 'number') {
-          clearInterval(scannerRef.current);
-        } else if (scannerRef.current.stop) {
-          await scannerRef.current.stop().catch(() => {});
-        }
-        scannerRef.current = null;
-      }
-
-      if (videoRef.current && videoRef.current.srcObject) {
-        const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
-        tracks.forEach((t) => t.stop());
-        videoRef.current.srcObject = null;
-      }
-
-      // Yeni facing mode
-      const newFacing = cashierFacingMode === 'environment' ? 'user' : 'environment';
+      const newFacing = await cashierQrEngineRef.current.switchCamera();
       setCashierFacingMode(newFacing);
-      localStorage.setItem('onkati_cashier_camera_facing', newFacing);
-
-      // Yeni kamerayla başlat
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: newFacing },
-      });
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
-      }
-
-      // QR tarama yeniden başlat
-      if ('BarcodeDetector' in window) {
-        const detector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
-        scannerRef.current = setInterval(async () => {
-          if (!videoRef.current) return;
-          try {
-            const barcodes = await detector.detect(videoRef.current);
-            if (barcodes.length > 0) {
-              handleCashierQRResult(barcodes[0].rawValue);
-            }
-          } catch {
-            // Frame okuma hatası — devam
-          }
-        }, 300);
-      } else {
-        const { Html5Qrcode } = await import('html5-qrcode');
-        const scanner = new Html5Qrcode('cashier-qr-reader');
-        scannerRef.current = scanner;
-        await scanner.start(
-          { facingMode: newFacing },
-          { fps: 10, qrbox: { width: 250, height: 250 } },
-          (decodedText: string) => {
-            handleCashierQRResult(decodedText);
-          },
-          () => {}
-        );
-      }
     } catch (err) {
       console.error('Camera switch error:', err);
     } finally {
       setSwitchingCashierCamera(false);
     }
-  };
+  }, [switchingCashierCamera]);
 
-  const handleCashierQRResult = (rawValue: string) => {
+  const handleCashierQRResult = useCallback((rawValue: string) => {
     try {
       const parsed = JSON.parse(rawValue);
       if (parsed.type === 'customer_qr' && parsed.customer_id) {
@@ -477,13 +413,13 @@ export function CustomerPanel() {
           alert('QR kodu süresi dolmuş. Müşteriden yeni QR göstermesini isteyin.');
           return;
         }
-        stopCashierScanner();
+        // Engine zaten onScanSuccess içinde stop edildi
         setCashierCustomer({ id: parsed.customer_id, name: parsed.name || 'Müşteri' });
       }
     } catch {
       // Geçersiz QR — devam
     }
-  };
+  }, []);
 
   const handleCashierEarn = async () => {
     if (!selectedAssignment || !cashierCustomer) return;
@@ -632,43 +568,58 @@ export function CustomerPanel() {
 
               {cashierScanning ? (
                 <div className="space-y-3">
-                  <div className="relative rounded-xl overflow-hidden bg-black aspect-square">
-                    <video
-                      ref={videoRef}
-                      className="w-full h-full object-cover"
-                      playsInline
-                      muted
-                    />
-                    <div id="cashier-qr-reader" className="absolute inset-0" />
-                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                      <div className="w-48 h-48 border-2 border-white/60 rounded-2xl" />
-                    </div>
-                    {/* Kamera Değiştir Butonu */}
-                    <button
-                      onClick={switchCashierCamera}
-                      disabled={switchingCashierCamera}
-                      className="absolute top-3 right-3 p-2.5 rounded-full bg-black/50 hover:bg-black/70 border border-white/30 transition disabled:opacity-40 disabled:cursor-not-allowed z-10"
-                      title={cashierFacingMode === 'environment' ? 'Ön kameraya geç' : 'Arka kameraya geç'}
-                    >
-                      {switchingCashierCamera ? (
-                        <Loader2 className="w-5 h-5 text-white animate-spin" />
-                      ) : (
-                        <SwitchCamera className="w-5 h-5 text-white" />
-                      )}
-                    </button>
-                  </div>
-                  {/* Aktif kamera bilgisi */}
-                  <div className="flex items-center justify-center">
+                  {/* Üst kontrol çubuğu */}
+                  <div className="flex items-center justify-between">
                     <span className="text-xs font-medium text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
                       {cashierFacingMode === 'environment' ? '📷 Arka Kamera' : '🤳 Ön Kamera'}
                     </span>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={switchCashierCamera}
+                        disabled={switchingCashierCamera || !cashierScannerReady}
+                        className="p-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                        title={cashierFacingMode === 'environment' ? 'Ön kameraya geç' : 'Arka kameraya geç'}
+                      >
+                        {switchingCashierCamera ? (
+                          <Loader2 className="w-5 h-5 text-indigo-600 animate-spin" />
+                        ) : (
+                          <SwitchCamera className="w-5 h-5 text-indigo-600" />
+                        )}
+                      </button>
+                      <button onClick={stopCashierScanner} className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200">
+                        <X className="w-5 h-5 text-gray-600" />
+                      </button>
+                    </div>
                   </div>
-                  <button
-                    onClick={stopCashierScanner}
-                    className="w-full py-3 bg-red-100 text-red-700 rounded-xl font-semibold hover:bg-red-200 transition"
-                  >
-                    Taramayı Durdur
-                  </button>
+                  {/* QR Engine container */}
+                  <div id="cashier-qr-reader" className="rounded-xl overflow-hidden min-h-[280px] bg-black" />
+                  {!cashierScannerReady && !cashierCameraError && (
+                    <div className="flex items-center justify-center py-3">
+                      <div className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse mr-2" />
+                      <span className="text-sm text-gray-500">Kamera başlatılıyor...</span>
+                    </div>
+                  )}
+                  {cashierCameraError && (
+                    <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-center">
+                      <div className="flex items-center justify-center gap-1 mb-1">
+                        <AlertCircle className="w-4 h-4 text-red-500" />
+                        <span className="text-sm font-medium text-red-700">Kamera Hatası</span>
+                      </div>
+                      <p className="text-xs text-red-600 mb-2">{cashierCameraError}</p>
+                      <button
+                        onClick={startCashierScanner}
+                        className="w-full py-2 bg-red-100 text-red-700 rounded-lg text-sm font-medium hover:bg-red-200 flex items-center justify-center gap-1"
+                      >
+                        Tekrar Dene
+                      </button>
+                    </div>
+                  )}
+                  {cashierScannerReady && (
+                    <div className="flex items-center justify-center py-2">
+                      <div className="w-2 h-2 bg-green-500 rounded-full mr-2" />
+                      <span className="text-xs text-green-600 font-medium">Kamera aktif — QR kodu gösterin</span>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <button
