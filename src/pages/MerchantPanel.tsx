@@ -34,6 +34,13 @@ import {
   Trash2,
   Moon,
   User,
+  Save,
+  Megaphone,
+  Bell,
+  CalendarDays,
+  Target,
+  Pause,
+  Play,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -43,7 +50,7 @@ import { withRetry, resilientRpc, resilientQuery } from '../lib/retry';
 import { toast } from '../lib/toast';
 
 type MerchantTab = 'islem' | 'musteriler' | 'gecmis' | 'profilim';
-type ProfileSubTab = 'bilgilerim' | 'kasiyerler' | 'guvenlik' | 'ayarlar';
+type ProfileSubTab = 'bilgilerim' | 'kampanyalar' | 'kasiyerler' | 'guvenlik' | 'ayarlar';
 
 interface CustomerInfo {
   customer_id: string;
@@ -106,6 +113,32 @@ export function MerchantPanel() {
   const [closingHour, setClosingHour] = useState('22:00');
   const [savingSettings, setSavingSettings] = useState(false);
 
+  // Profil Düzenleme Form State
+  const [profileForm, setProfileForm] = useState({
+    store_name: '',
+    full_name: '',
+    phone: '',
+    email: '',
+    new_password: '',
+  });
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileFormInitialized, setProfileFormInitialized] = useState(false);
+
+  // Kampanya State
+  const [campaigns, setCampaigns] = useState<any[]>([]);
+  const [monthlyUsed, setMonthlyUsed] = useState(0);
+  const [monthlyRemaining, setMonthlyRemaining] = useState(5);
+  const [showCampaignForm, setShowCampaignForm] = useState(false);
+  const [campaignForm, setCampaignForm] = useState({
+    title: '',
+    description: '',
+    target_audience: 'all_customers',
+    starts_at: new Date().toISOString().slice(0, 16),
+    ends_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16),
+  });
+  const [publishingCampaign, setPublishingCampaign] = useState(false);
+  const [loadingCampaigns, setLoadingCampaigns] = useState(false);
+
   // QR Scanner state — Enterprise QR Engine
   const [showScanner, setShowScanner] = useState(false);
   const [scannerReady, setScannerReady] = useState(false);
@@ -136,7 +169,62 @@ export function MerchantPanel() {
     fetchMerchantSettings();
     fetchCashiers();
     fetchStoreSettings();
+    fetchCampaigns();
   }, [authLoading, user, navigate]);
+
+  // Profil formunu başlat
+  useEffect(() => {
+    if (!profileFormInitialized && merchant && profile && user) {
+      setProfileForm({
+        store_name: merchant.store_name || '',
+        full_name: profile.full_name || '',
+        phone: profile.phone || '',
+        email: user.email || '',
+        new_password: '',
+      });
+      setProfileFormInitialized(true);
+    }
+  }, [merchant, profile, user, profileFormInitialized]);
+
+  const handleSaveProfile = async () => {
+    setSavingProfile(true);
+    try {
+      // Profil tablosunu güncelle (full_name, phone)
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({ full_name: profileForm.full_name, phone: profileForm.phone })
+        .eq('id', user!.id);
+      if (profileError) throw profileError;
+
+      // Mağaza adını güncelle
+      if (merchant?.id) {
+        const { error: merchantError } = await supabase
+          .from('merchants')
+          .update({ store_name: profileForm.store_name })
+          .eq('id', merchant.id);
+        if (merchantError) throw merchantError;
+      }
+
+      // E-posta güncelle
+      if (profileForm.email && profileForm.email !== user!.email) {
+        const { error: emailError } = await supabase.auth.updateUser({ email: profileForm.email });
+        if (emailError) throw emailError;
+      }
+
+      // Şifre güncelle (opsiyonel)
+      if (profileForm.new_password && profileForm.new_password.length >= 6) {
+        const { error: passError } = await supabase.auth.updateUser({ password: profileForm.new_password });
+        if (passError) throw passError;
+        setProfileForm(prev => ({ ...prev, new_password: '' }));
+      }
+
+      toast.success('Bilgileriniz başarıyla güncellendi');
+    } catch (err: any) {
+      toast.error(err.message || 'Güncelleme sırasında hata oluştu');
+    } finally {
+      setSavingProfile(false);
+    }
+  };
 
   // Realtime
   useEffect(() => {
@@ -571,6 +659,121 @@ export function MerchantPanel() {
     }
     setTimeout(() => setMessage(null), 3000);
     setSavingSettings(false);
+  };
+
+  // ============ KAMPANYA FONKSİYONLARI ============
+  const fetchCampaigns = useCallback(async () => {
+    setLoadingCampaigns(true);
+    try {
+      const { data, error } = await supabase.rpc('kampanya_listele');
+      const r = data as any;
+      if (!error && r?.success) {
+        setCampaigns(r.campaigns || []);
+        setMonthlyUsed(r.monthly_used || 0);
+        setMonthlyRemaining(r.monthly_remaining ?? 5);
+      }
+    } catch {
+      // RPC henüz yoksa sessizce devam
+    }
+    setLoadingCampaigns(false);
+  }, []);
+
+  const handlePublishCampaign = async () => {
+    if (!campaignForm.title.trim()) {
+      toast.error('Kampanya başlığı gerekli');
+      return;
+    }
+    if (!campaignForm.ends_at) {
+      toast.error('Bitiş tarihi gerekli');
+      return;
+    }
+    if (monthlyRemaining <= 0) {
+      toast.error('Aylık bildirim limitinize ulaştınız');
+      return;
+    }
+
+    setPublishingCampaign(true);
+    try {
+      const { data, error } = await supabase.rpc('kampanya_olustur', {
+        p_title: campaignForm.title.trim(),
+        p_description: campaignForm.description.trim(),
+        p_target_audience: campaignForm.target_audience,
+        p_starts_at: new Date(campaignForm.starts_at).toISOString(),
+        p_ends_at: new Date(campaignForm.ends_at).toISOString(),
+      });
+
+      const r = data as any;
+      if (!error && r?.success) {
+        toast.success('Kampanya Yayınlandı!', `${r.notifications_sent} müşteriye bildirim gönderildi`);
+        setCampaignForm({
+          title: '',
+          description: '',
+          target_audience: 'all_customers',
+          starts_at: new Date().toISOString().slice(0, 16),
+          ends_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16),
+        });
+        setShowCampaignForm(false);
+        fetchCampaigns();
+
+        // Web Push Notification tetikle (müşteri tarafında service worker varsa)
+        if ('serviceWorker' in navigator && 'Notification' in window && Notification.permission === 'granted') {
+          try {
+            const reg = await navigator.serviceWorker.ready;
+            await reg.showNotification('Onkatı - Yeni Kampanya', {
+              body: campaignForm.title,
+              icon: '/favicon.ico',
+              badge: '/favicon.ico',
+              vibrate: [200, 100, 200],
+              tag: 'campaign-' + r.campaign_id,
+            });
+          } catch {
+            // Push notification gönderilemezse sessizce devam
+          }
+        }
+      } else {
+        const errMsg = r?.error || error?.message || 'Kampanya oluşturulamadı';
+        toast.error(errMsg);
+      }
+    } catch (err: any) {
+      toast.error('Bağlantı hatası');
+    }
+    setPublishingCampaign(false);
+  };
+
+  const handleToggleCampaign = async (campaignId: string, currentActive: boolean) => {
+    try {
+      const { data, error } = await supabase.rpc('kampanya_durum_degistir', {
+        p_campaign_id: campaignId,
+        p_is_active: !currentActive,
+      });
+      const r = data as any;
+      if (!error && r?.success) {
+        toast.success(currentActive ? 'Kampanya pasife alındı' : 'Kampanya aktifleştirildi');
+        fetchCampaigns();
+      } else {
+        toast.error('İşlem başarısız');
+      }
+    } catch {
+      toast.error('Bağlantı hatası');
+    }
+  };
+
+  const handleDeleteCampaign = async (campaignId: string) => {
+    if (!confirm('Bu kampanyayı silmek istediğinize emin misiniz?')) return;
+    try {
+      const { data, error } = await supabase.rpc('kampanya_sil', {
+        p_campaign_id: campaignId,
+      });
+      const r = data as any;
+      if (!error && r?.success) {
+        toast.success('Kampanya silindi');
+        fetchCampaigns();
+      } else {
+        toast.error('Silme başarısız');
+      }
+    } catch {
+      toast.error('Bağlantı hatası');
+    }
   };
 
   // QR Scanner — Enterprise: Kamera milisaniyeler içinde açılır
@@ -1493,6 +1696,7 @@ export function MerchantPanel() {
             <div className="flex gap-1 bg-gray-100 rounded-xl p-1 overflow-x-auto">
               {([
                 { key: 'bilgilerim', label: 'Bilgilerim', icon: User },
+                { key: 'kampanyalar', label: 'Kampanyalar', icon: Megaphone },
                 { key: 'kasiyerler', label: 'Kasiyerler', icon: UserPlus },
                 { key: 'guvenlik', label: 'Güvenlik', icon: Shield },
                 { key: 'ayarlar', label: 'Ayarlar', icon: Settings },
@@ -1517,17 +1721,68 @@ export function MerchantPanel() {
               <div className="space-y-4">
                 <h2 className="text-lg font-bold text-gray-800">Bilgilerim</h2>
                 <div className="bg-white rounded-2xl shadow-lg p-5 border border-gray-100 space-y-4">
-                  <div className="flex items-center gap-4">
-                    <div className="w-16 h-16 bg-gradient-to-br from-emerald-100 to-teal-100 rounded-full flex items-center justify-center">
-                      <Store className="w-8 h-8 text-emerald-600" />
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="font-bold text-gray-800">{merchant?.store_name || 'Mağaza Adı'}</h3>
-                      <p className="text-sm text-gray-500">{profile?.full_name || 'İsim'}</p>
-                      <p className="text-xs text-gray-400">{user?.email || ''}</p>
-                      <p className="text-xs text-gray-400">{profile?.phone || ''}</p>
-                    </div>
+                  {/* Dükkan / İşletme Adı */}
+                  <div>
+                    <label className="text-xs font-medium text-gray-500 mb-1.5 block">Dükkan / İşletme Adı</label>
+                    <input
+                      type="text"
+                      value={profileForm.store_name}
+                      onChange={(e) => setProfileForm(prev => ({ ...prev, store_name: e.target.value }))}
+                      placeholder="Mağaza adınız"
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm transition"
+                    />
                   </div>
+
+                  {/* Yetkili Ad Soyad */}
+                  <div>
+                    <label className="text-xs font-medium text-gray-500 mb-1.5 block">Yetkili Ad Soyad</label>
+                    <input
+                      type="text"
+                      value={profileForm.full_name}
+                      onChange={(e) => setProfileForm(prev => ({ ...prev, full_name: e.target.value }))}
+                      placeholder="Ad Soyad"
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm transition"
+                    />
+                  </div>
+
+                  {/* Telefon Numarası */}
+                  <div>
+                    <label className="text-xs font-medium text-gray-500 mb-1.5 block">Telefon Numarası</label>
+                    <input
+                      type="tel"
+                      value={profileForm.phone}
+                      onChange={(e) => setProfileForm(prev => ({ ...prev, phone: e.target.value }))}
+                      placeholder="05XX XXX XX XX"
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm transition"
+                    />
+                  </div>
+
+                  {/* E-posta Adresi */}
+                  <div>
+                    <label className="text-xs font-medium text-gray-500 mb-1.5 block">E-posta Adresi</label>
+                    <input
+                      type="email"
+                      value={profileForm.email}
+                      onChange={(e) => setProfileForm(prev => ({ ...prev, email: e.target.value }))}
+                      placeholder="ornek@email.com"
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm transition"
+                    />
+                  </div>
+
+                  {/* Yeni Şifre (Opsiyonel) */}
+                  <div>
+                    <label className="text-xs font-medium text-gray-500 mb-1.5 block">Yeni Şifre (Opsiyonel)</label>
+                    <input
+                      type="password"
+                      value={profileForm.new_password}
+                      onChange={(e) => setProfileForm(prev => ({ ...prev, new_password: e.target.value }))}
+                      placeholder="En az 6 karakter"
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm transition"
+                    />
+                    <p className="text-xs text-gray-400 mt-1">Değiştirmek istemiyorsanız boş bırakın</p>
+                  </div>
+
+                  {/* Bilgi Satırları (Salt Okunur) */}
                   <div className="border-t pt-4 space-y-2">
                     <div className="flex justify-between text-sm">
                       <span className="text-gray-500">Mağaza Kodu</span>
@@ -1546,6 +1801,290 @@ export function MerchantPanel() {
                       <span className="font-semibold">{myCustomers.length}</span>
                     </div>
                   </div>
+
+                  {/* Kaydet Butonu */}
+                  <button
+                    onClick={handleSaveProfile}
+                    disabled={savingProfile}
+                    className="w-full py-3.5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-xl font-semibold hover:from-emerald-700 hover:to-teal-700 transition disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {savingProfile ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <Save className="w-5 h-5" />
+                    )}
+                    {savingProfile ? 'Kaydediliyor...' : 'Bilgileri Güncelle'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Kampanyalar Alt Sekmesi */}
+            {profileSubTab === 'kampanyalar' && (
+              <div className="space-y-4">
+                {/* Aylık Limit Sayacı */}
+                <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-2xl p-4 border border-purple-100">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Megaphone className="w-5 h-5 text-purple-600" />
+                      <span className="text-sm font-semibold text-purple-800">Aylık Bildirim Hakkı</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className={`text-2xl font-black ${monthlyRemaining > 0 ? 'text-purple-700' : 'text-red-600'}`}>
+                        {monthlyRemaining}
+                      </span>
+                      <span className="text-sm text-purple-500">/ 5</span>
+                    </div>
+                  </div>
+                  {monthlyRemaining <= 0 && (
+                    <div className="mt-2 bg-red-50 border border-red-200 rounded-xl p-2.5 flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                      <p className="text-xs text-red-700">
+                        Aylık 5 bildirim limitinize ulaştınız. Yeni hakkınız önümüzdeki ay tanımlanacaktır.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Yeni Kampanya Oluştur Butonu */}
+                {!showCampaignForm && (
+                  <button
+                    onClick={() => setShowCampaignForm(true)}
+                    disabled={monthlyRemaining <= 0}
+                    className="w-full py-4 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-2xl font-bold text-base hover:from-purple-700 hover:to-indigo-700 transition shadow-lg shadow-purple-200 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Megaphone className="w-5 h-5" />
+                    Kampanya / Bildirim Oluştur
+                  </button>
+                )}
+
+                {/* Kampanya Oluşturma Formu */}
+                {showCampaignForm && (
+                  <div className="bg-white rounded-2xl shadow-lg p-5 border border-gray-100 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-base font-bold text-gray-800 flex items-center gap-2">
+                        <Megaphone className="w-5 h-5 text-purple-600" />
+                        Yeni Kampanya
+                      </h3>
+                      <button
+                        onClick={() => setShowCampaignForm(false)}
+                        className="p-1.5 rounded-lg hover:bg-gray-100"
+                      >
+                        <X className="w-5 h-5 text-gray-400" />
+                      </button>
+                    </div>
+
+                    {/* Başlık */}
+                    <div>
+                      <label className="text-xs font-medium text-gray-500 mb-1.5 block">Kampanya / Duyuru Başlığı</label>
+                      <input
+                        type="text"
+                        value={campaignForm.title}
+                        onChange={(e) => setCampaignForm(prev => ({ ...prev, title: e.target.value }))}
+                        placeholder="Örn: Bu Hafta Sonu Çorbalarda 2 Kat Puan!"
+                        maxLength={100}
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 text-sm transition"
+                      />
+                    </div>
+
+                    {/* Açıklama */}
+                    <div>
+                      <label className="text-xs font-medium text-gray-500 mb-1.5 block">Kampanya Detayı / Açıklama</label>
+                      <textarea
+                        value={campaignForm.description}
+                        onChange={(e) => setCampaignForm(prev => ({ ...prev, description: e.target.value }))}
+                        placeholder="Örn: Tüm sıcak içecek ve çorba alımlarınızda puanlarınız Onkatı hesabınıza anında yüklenecektir."
+                        rows={3}
+                        maxLength={500}
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 text-sm transition resize-none"
+                      />
+                    </div>
+
+                    {/* Tarih Seçiciler */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs font-medium text-gray-500 mb-1.5 block flex items-center gap-1">
+                          <CalendarDays className="w-3.5 h-3.5" /> Başlangıç
+                        </label>
+                        <input
+                          type="datetime-local"
+                          value={campaignForm.starts_at}
+                          onChange={(e) => setCampaignForm(prev => ({ ...prev, starts_at: e.target.value }))}
+                          className="w-full px-3 py-2.5 rounded-xl border border-gray-200 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 text-xs transition"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-gray-500 mb-1.5 block flex items-center gap-1">
+                          <CalendarDays className="w-3.5 h-3.5" /> Bitiş
+                        </label>
+                        <input
+                          type="datetime-local"
+                          value={campaignForm.ends_at}
+                          onChange={(e) => setCampaignForm(prev => ({ ...prev, ends_at: e.target.value }))}
+                          className="w-full px-3 py-2.5 rounded-xl border border-gray-200 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 text-xs transition"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Hedef Kitle */}
+                    <div>
+                      <label className="text-xs font-medium text-gray-500 mb-2 block flex items-center gap-1">
+                        <Target className="w-3.5 h-3.5" /> Hedef Kitle
+                      </label>
+                      <div className="space-y-2">
+                        <label className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition ${
+                          campaignForm.target_audience === 'all_customers'
+                            ? 'border-purple-500 bg-purple-50'
+                            : 'border-gray-200 hover:border-gray-300'
+                        }`}>
+                          <input
+                            type="radio"
+                            name="target"
+                            value="all_customers"
+                            checked={campaignForm.target_audience === 'all_customers'}
+                            onChange={() => setCampaignForm(prev => ({ ...prev, target_audience: 'all_customers' }))}
+                            className="w-4 h-4 text-purple-600"
+                          />
+                          <div>
+                            <p className="text-sm font-medium text-gray-800">Tüm Müşterilerim</p>
+                            <p className="text-xs text-gray-500">Bu işletmeden alışveriş yapan tüm müşteriler</p>
+                          </div>
+                        </label>
+                        <label className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition ${
+                          campaignForm.target_audience === 'inactive_30_days'
+                            ? 'border-purple-500 bg-purple-50'
+                            : 'border-gray-200 hover:border-gray-300'
+                        }`}>
+                          <input
+                            type="radio"
+                            name="target"
+                            value="inactive_30_days"
+                            checked={campaignForm.target_audience === 'inactive_30_days'}
+                            onChange={() => setCampaignForm(prev => ({ ...prev, target_audience: 'inactive_30_days' }))}
+                            className="w-4 h-4 text-purple-600"
+                          />
+                          <div>
+                            <p className="text-sm font-medium text-gray-800">Son 30 Gündür Gelmeyen</p>
+                            <p className="text-xs text-gray-500">Uzun süredir alışveriş yapmayan müşteriler</p>
+                          </div>
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* Yayınla Butonu */}
+                    <button
+                      onClick={handlePublishCampaign}
+                      disabled={publishingCampaign || !campaignForm.title.trim() || monthlyRemaining <= 0}
+                      className="w-full py-3.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-xl font-bold hover:from-purple-700 hover:to-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-purple-200"
+                    >
+                      {publishingCampaign ? (
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                      ) : (
+                        <Bell className="w-5 h-5" />
+                      )}
+                      {publishingCampaign ? 'Gönderiliyor...' : 'Kampanyayı Yayınla'}
+                    </button>
+
+                    <p className="text-xs text-gray-400 text-center">
+                      Bildirim sadece sizden alışveriş yapmış müşterilere gönderilecektir.
+                    </p>
+                  </div>
+                )}
+
+                {/* Aktif Kampanyalarım Listesi */}
+                <div className="bg-white rounded-2xl shadow-lg p-5 border border-gray-100">
+                  <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                    <Megaphone className="w-4 h-4 text-purple-600" />
+                    Kampanyalarım ({campaigns.length})
+                  </h3>
+
+                  {loadingCampaigns ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader2 className="w-6 h-6 animate-spin text-purple-500" />
+                    </div>
+                  ) : campaigns.length === 0 ? (
+                    <div className="text-center py-8 text-gray-400">
+                      <Megaphone className="w-10 h-10 mx-auto mb-2 opacity-50" />
+                      <p className="text-sm">Henüz kampanya oluşturmadınız</p>
+                      <p className="text-xs mt-1">Müşterilerinize özel kampanyalar gönderin</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {campaigns.map((camp: any) => {
+                        const isExpired = new Date(camp.ends_at) < new Date();
+                        const isActive = camp.is_active && !isExpired;
+                        return (
+                          <div
+                            key={camp.id}
+                            className={`p-4 rounded-xl border transition ${
+                              isActive
+                                ? 'bg-purple-50/50 border-purple-200'
+                                : 'bg-gray-50 border-gray-200 opacity-70'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                                    isActive
+                                      ? 'bg-green-100 text-green-700'
+                                      : isExpired
+                                        ? 'bg-gray-100 text-gray-500'
+                                        : 'bg-orange-100 text-orange-700'
+                                  }`}>
+                                    {isActive ? '● Aktif' : isExpired ? '● Süresi Doldu' : '● Pasif'}
+                                  </span>
+                                  <span className="text-[10px] text-gray-400">
+                                    {camp.notification_count || 0} kişiye gönderildi
+                                  </span>
+                                </div>
+                                <p className="font-semibold text-sm text-gray-800 truncate">{camp.title}</p>
+                                {camp.description && (
+                                  <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{camp.description}</p>
+                                )}
+                                <div className="flex items-center gap-2 mt-2 text-[10px] text-gray-400">
+                                  <CalendarDays className="w-3 h-3" />
+                                  <span>
+                                    {new Date(camp.starts_at).toLocaleDateString('tr-TR')} — {new Date(camp.ends_at).toLocaleDateString('tr-TR')}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1 shrink-0">
+                                {!isExpired && (
+                                  <button
+                                    onClick={() => handleToggleCampaign(camp.id, camp.is_active)}
+                                    className="p-2 rounded-lg hover:bg-gray-100 transition"
+                                    title={camp.is_active ? 'Pasife Al' : 'Aktifleştir'}
+                                  >
+                                    {camp.is_active ? (
+                                      <Pause className="w-4 h-4 text-orange-500" />
+                                    ) : (
+                                      <Play className="w-4 h-4 text-green-500" />
+                                    )}
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => handleDeleteCampaign(camp.id)}
+                                  className="p-2 rounded-lg hover:bg-red-50 transition"
+                                  title="Sil"
+                                >
+                                  <Trash2 className="w-4 h-4 text-red-400" />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Bilgi Notu */}
+                <div className="bg-purple-50 border border-purple-200 rounded-xl p-3 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-purple-600 shrink-0 mt-0.5" />
+                  <p className="text-xs text-purple-700">
+                    Kampanyalar sadece sizden daha önce alışveriş yapmış müşterilere gönderilir. Aylık 5 bildirim hakkınız vardır.
+                  </p>
                 </div>
               </div>
             )}

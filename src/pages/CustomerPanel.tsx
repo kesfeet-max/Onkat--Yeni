@@ -20,6 +20,10 @@ import {
   ArrowLeft,
   SwitchCamera,
   User,
+  Save,
+  Bell,
+  Megaphone,
+  CalendarDays,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -27,7 +31,7 @@ import { formatCurrency, formatDate } from '../lib/utils';
 import { QREngine, CameraFacing, getSavedCameraPreference } from '../lib/qr-engine';
 import QRCode from 'qrcode';
 
-type TabType = 'qr' | 'esnaflar' | 'gecmis' | 'profilim';
+type TabType = 'qr' | 'esnaflar' | 'gecmis' | 'duyurular' | 'profilim';
 
 interface StoreBalance {
   id: string;
@@ -97,6 +101,21 @@ export function CustomerPanel() {
   const [cashierCameraError, setCashierCameraError] = useState<string | null>(null);
   const cashierQrEngineRef = useRef<QREngine | null>(null);
 
+  // Duyurular State
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [loadingNotifications, setLoadingNotifications] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  // Müşteri Profil Düzenleme Form State
+  const [customerProfileForm, setCustomerProfileForm] = useState({
+    full_name: '',
+    phone: '',
+    email: '',
+    new_password: '',
+  });
+  const [savingCustomerProfile, setSavingCustomerProfile] = useState(false);
+  const [customerProfileFormInitialized, setCustomerProfileFormInitialized] = useState(false);
+
   const customer = profile as any;
 
   // Auth yüklenmesini bekle, sonra veri çek
@@ -126,6 +145,52 @@ export function CustomerPanel() {
     };
   }, []);
 
+  // Müşteri profil formunu başlat
+  useEffect(() => {
+    if (!customerProfileFormInitialized && customer && user) {
+      setCustomerProfileForm({
+        full_name: customer.full_name || '',
+        phone: customer.phone || '',
+        email: user.email || '',
+        new_password: '',
+      });
+      setCustomerProfileFormInitialized(true);
+    }
+  }, [customer, user, customerProfileFormInitialized]);
+
+  const handleSaveCustomerProfile = async () => {
+    setSavingCustomerProfile(true);
+    try {
+      // Profil tablosunu güncelle (phone)
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({ phone: customerProfileForm.phone })
+        .eq('id', user!.id);
+      if (profileError) throw profileError;
+
+      // E-posta güncelle
+      if (customerProfileForm.email && customerProfileForm.email !== user!.email) {
+        const { error: emailError } = await supabase.auth.updateUser({ email: customerProfileForm.email });
+        if (emailError) throw emailError;
+      }
+
+      // Şifre güncelle (opsiyonel)
+      if (customerProfileForm.new_password && customerProfileForm.new_password.length >= 6) {
+        const { error: passError } = await supabase.auth.updateUser({ password: customerProfileForm.new_password });
+        if (passError) throw passError;
+        setCustomerProfileForm(prev => ({ ...prev, new_password: '' }));
+      }
+
+      setMessage({ type: 'success', text: 'Bilgileriniz başarıyla güncellendi' });
+      setTimeout(() => setMessage(null), 3000);
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Güncelleme sırasında hata oluştu' });
+      setTimeout(() => setMessage(null), 4000);
+    } finally {
+      setSavingCustomerProfile(false);
+    }
+  };
+
   const loadData = async () => {
     try {
       setDataLoading(true);
@@ -134,6 +199,7 @@ export function CustomerPanel() {
         fetchStoreBalances(),
         fetchTransactions(),
         checkCashierAuth(),
+        fetchNotifications(),
       ]);
     } catch (err) {
       console.error('CustomerPanel loadData error:', err);
@@ -152,6 +218,46 @@ export function CustomerPanel() {
       }
     } catch {
       // RPC henüz yoksa sessizce devam
+    }
+  };
+
+  // ============ DUYURU FONKSİYONLARI ============
+  const fetchNotifications = async () => {
+    setLoadingNotifications(true);
+    try {
+      const { data, error } = await supabase.rpc('musteri_bildirimleri_getir');
+      const r = data as any;
+      if (!error && r?.success) {
+        const notifs = r.notifications || [];
+        setNotifications(notifs);
+        setUnreadCount(notifs.filter((n: any) => !n.is_read).length);
+      }
+    } catch {
+      // RPC henüz yoksa sessizce devam
+    }
+    setLoadingNotifications(false);
+  };
+
+  const handleMarkAsRead = async (notificationId: string) => {
+    try {
+      const { data, error } = await supabase.rpc('bildirim_okundu', {
+        p_notification_id: notificationId,
+      });
+      if (!error && (data as any)?.success) {
+        setNotifications(prev =>
+          prev.map(n => n.id === notificationId ? { ...n, is_read: true } : n)
+        );
+        setUnreadCount(prev => Math.max(0, prev - 1));
+      }
+    } catch {
+      // sessizce devam
+    }
+  };
+
+  const handleMarkAllAsRead = async () => {
+    const unreadIds = notifications.filter(n => !n.is_read).map(n => n.id);
+    for (const id of unreadIds) {
+      await handleMarkAsRead(id);
     }
   };
 
@@ -1093,34 +1199,165 @@ export function CustomerPanel() {
           </div>
         )}
 
+        {/* Duyurular Tab */}
+        {activeTab === 'duyurular' && (
+          <div className="space-y-4">
+            {/* Başlık ve Tümünü Okundu İşaretle */}
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                <Bell className="w-5 h-5 text-purple-600" />
+                Duyurular
+                {unreadCount > 0 && (
+                  <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                    {unreadCount} yeni
+                  </span>
+                )}
+              </h2>
+              {unreadCount > 0 && (
+                <button
+                  onClick={handleMarkAllAsRead}
+                  className="text-xs text-purple-600 font-medium hover:text-purple-800 transition"
+                >
+                  Tümünü Okundu İşaretle
+                </button>
+              )}
+            </div>
+
+            {/* Bildirim Listesi */}
+            {loadingNotifications ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="w-6 h-6 animate-spin text-purple-500" />
+              </div>
+            ) : notifications.length === 0 ? (
+              <div className="bg-white rounded-2xl shadow-lg p-8 border border-gray-100 text-center">
+                <Bell className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+                <p className="text-sm font-medium text-gray-500">Henüz bildiriminiz yok</p>
+                <p className="text-xs text-gray-400 mt-1">Esnaflardan gelen kampanya ve duyurular burada görünecek</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {notifications.map((notif: any) => (
+                  <div
+                    key={notif.id}
+                    onClick={() => !notif.is_read && handleMarkAsRead(notif.id)}
+                    className={`bg-white rounded-2xl shadow-sm p-4 border transition cursor-pointer ${
+                      notif.is_read
+                        ? 'border-gray-100 opacity-70'
+                        : 'border-purple-200 bg-purple-50/30 shadow-md'
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
+                        notif.is_read ? 'bg-gray-100' : 'bg-purple-100'
+                      }`}>
+                        <Megaphone className={`w-5 h-5 ${notif.is_read ? 'text-gray-400' : 'text-purple-600'}`} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <span className="text-xs font-semibold text-purple-700 bg-purple-100 px-2 py-0.5 rounded-full">
+                            {notif.store_name || 'Kampanya'}
+                          </span>
+                          {!notif.is_read && (
+                            <span className="w-2 h-2 bg-purple-500 rounded-full animate-pulse" />
+                          )}
+                        </div>
+                        <p className="font-semibold text-sm text-gray-800 mt-1">{notif.title}</p>
+                        {notif.description && (
+                          <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{notif.description}</p>
+                        )}
+                        <div className="flex items-center gap-2 mt-2 text-[10px] text-gray-400">
+                          <CalendarDays className="w-3 h-3" />
+                          <span>{new Date(notif.created_at).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Profilim Tab */}
         {activeTab === 'profilim' && (
           <div className="space-y-4">
-            {/* Bilgilerim Kartı */}
+            {/* Bilgilerim Formu */}
             <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100">
               <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
                 <User className="w-5 h-5 text-emerald-600" />
                 Bilgilerim
               </h3>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between py-2 border-b border-gray-50">
-                  <span className="text-sm text-gray-500">Ad Soyad</span>
-                  <span className="text-sm font-semibold text-gray-800">{customer.full_name || '—'}</span>
+              <div className="space-y-4">
+                {/* Ad Soyad (Salt Okunur) */}
+                <div>
+                  <label className="text-xs font-medium text-gray-500 mb-1.5 block">Ad Soyad</label>
+                  <input
+                    type="text"
+                    value={customerProfileForm.full_name}
+                    disabled
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 text-gray-600 text-sm cursor-not-allowed"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">Güvenlik gereği değiştirilemez</p>
                 </div>
-                <div className="flex items-center justify-between py-2 border-b border-gray-50">
-                  <span className="text-sm text-gray-500">Telefon</span>
-                  <span className="text-sm font-semibold text-gray-800">{customer.phone || '—'}</span>
+
+                {/* Telefon Numarası */}
+                <div>
+                  <label className="text-xs font-medium text-gray-500 mb-1.5 block">Telefon Numarası</label>
+                  <input
+                    type="tel"
+                    value={customerProfileForm.phone}
+                    onChange={(e) => setCustomerProfileForm(prev => ({ ...prev, phone: e.target.value }))}
+                    placeholder="05XX XXX XX XX"
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm transition"
+                  />
                 </div>
-                <div className="flex items-center justify-between py-2 border-b border-gray-50">
-                  <span className="text-sm text-gray-500">E-posta</span>
-                  <span className="text-sm font-semibold text-gray-800">{customer.email || '—'}</span>
+
+                {/* E-posta Adresi */}
+                <div>
+                  <label className="text-xs font-medium text-gray-500 mb-1.5 block">E-posta Adresi</label>
+                  <input
+                    type="email"
+                    value={customerProfileForm.email}
+                    onChange={(e) => setCustomerProfileForm(prev => ({ ...prev, email: e.target.value }))}
+                    placeholder="ornek@email.com"
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm transition"
+                  />
                 </div>
-                <div className="flex items-center justify-between py-2">
+
+                {/* Yeni Şifre (Opsiyonel) */}
+                <div>
+                  <label className="text-xs font-medium text-gray-500 mb-1.5 block">Yeni Şifre (Opsiyonel)</label>
+                  <input
+                    type="password"
+                    value={customerProfileForm.new_password}
+                    onChange={(e) => setCustomerProfileForm(prev => ({ ...prev, new_password: e.target.value }))}
+                    placeholder="En az 6 karakter"
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm transition"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">Değiştirmek istemiyorsanız boş bırakın</p>
+                </div>
+
+                {/* Üyelik Tarihi (Salt Okunur) */}
+                <div className="flex items-center justify-between py-2 border-t border-gray-100 mt-2">
                   <span className="text-sm text-gray-500">Üyelik Tarihi</span>
                   <span className="text-sm font-semibold text-gray-800">
                     {customer.created_at ? new Date(customer.created_at).toLocaleDateString('tr-TR') : '—'}
                   </span>
                 </div>
+
+                {/* Kaydet Butonu */}
+                <button
+                  onClick={handleSaveCustomerProfile}
+                  disabled={savingCustomerProfile}
+                  className="w-full py-3.5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-xl font-semibold hover:from-emerald-700 hover:to-teal-700 transition disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {savingCustomerProfile ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <Save className="w-5 h-5" />
+                  )}
+                  {savingCustomerProfile ? 'Kaydediliyor...' : 'Bilgileri Güncelle'}
+                </button>
               </div>
             </div>
 
@@ -1165,6 +1402,20 @@ export function CustomerPanel() {
           >
             <History className="w-5 h-5" />
             <span className="text-xs font-medium">Geçmiş</span>
+          </button>
+          <button
+            onClick={() => { setActiveTab('duyurular'); fetchNotifications(); }}
+            className={`flex-1 py-3 flex flex-col items-center gap-1 transition relative ${
+              activeTab === 'duyurular' ? 'text-purple-600' : 'text-gray-400 hover:text-gray-600'
+            }`}
+          >
+            <Bell className="w-5 h-5" />
+            <span className="text-xs font-medium">Duyurular</span>
+            {unreadCount > 0 && (
+              <span className="absolute top-1.5 right-1/4 w-4 h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </span>
+            )}
           </button>
           <button
             onClick={() => setActiveTab('profilim')}
