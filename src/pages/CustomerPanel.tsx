@@ -19,6 +19,7 @@ import {
   ShieldCheck,
   ArrowLeft,
   SwitchCamera,
+  User,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -26,7 +27,7 @@ import { formatCurrency, formatDate } from '../lib/utils';
 import { QREngine, CameraFacing, getSavedCameraPreference } from '../lib/qr-engine';
 import QRCode from 'qrcode';
 
-type TabType = 'qr' | 'esnaflar' | 'gecmis';
+type TabType = 'qr' | 'esnaflar' | 'gecmis' | 'profilim';
 
 interface StoreBalance {
   id: string;
@@ -844,12 +845,9 @@ export function CustomerPanel() {
             <p className="text-emerald-200 text-xs font-medium uppercase tracking-wider">Onkatı Sadakat</p>
             <h1 className="text-xl font-bold mt-0.5">Hoş geldiniz, {customer.full_name || 'Müşteri'}</h1>
           </div>
-          <button
-            onClick={signOut}
-            className="p-2.5 rounded-xl bg-white/10 hover:bg-white/20 transition backdrop-blur-sm"
-          >
-            <LogOut className="w-5 h-5" />
-          </button>
+          <div className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center">
+            <Wallet className="w-5 h-5" />
+          </div>
         </div>
 
         {/* Cüzdan Kartı */}
@@ -912,44 +910,7 @@ export function CustomerPanel() {
         )}
       </header>
 
-      {/* Tab Navigation */}
-      <nav className="bg-white border-b shadow-sm sticky top-0 z-40">
-        <div className="flex">
-          <button
-            onClick={() => setActiveTab('qr')}
-            className={`flex-1 py-3.5 px-2 text-center text-sm font-semibold border-b-3 transition ${
-              activeTab === 'qr'
-                ? 'border-emerald-600 text-emerald-700 bg-emerald-50/50'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            <QrCode className="w-5 h-5 mx-auto mb-1" />
-            QR Kodum
-          </button>
-          <button
-            onClick={() => setActiveTab('esnaflar')}
-            className={`flex-1 py-3.5 px-2 text-center text-sm font-semibold border-b-3 transition ${
-              activeTab === 'esnaflar'
-                ? 'border-emerald-600 text-emerald-700 bg-emerald-50/50'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            <Store className="w-5 h-5 mx-auto mb-1" />
-            Esnaflar
-          </button>
-          <button
-            onClick={() => setActiveTab('gecmis')}
-            className={`flex-1 py-3.5 px-2 text-center text-sm font-semibold border-b-3 transition ${
-              activeTab === 'gecmis'
-                ? 'border-emerald-600 text-emerald-700 bg-emerald-50/50'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            <History className="w-5 h-5 mx-auto mb-1" />
-            Geçmiş
-          </button>
-        </div>
-      </nav>
+
 
       {/* Content */}
       <main className="p-4 pb-24 max-w-lg mx-auto">
@@ -1131,7 +1092,91 @@ export function CustomerPanel() {
             )}
           </div>
         )}
+
+        {/* Profilim Tab */}
+        {activeTab === 'profilim' && (
+          <div className="space-y-4">
+            {/* Bilgilerim Kartı */}
+            <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100">
+              <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                <User className="w-5 h-5 text-emerald-600" />
+                Bilgilerim
+              </h3>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between py-2 border-b border-gray-50">
+                  <span className="text-sm text-gray-500">Ad Soyad</span>
+                  <span className="text-sm font-semibold text-gray-800">{customer.full_name || '—'}</span>
+                </div>
+                <div className="flex items-center justify-between py-2 border-b border-gray-50">
+                  <span className="text-sm text-gray-500">Telefon</span>
+                  <span className="text-sm font-semibold text-gray-800">{customer.phone || '—'}</span>
+                </div>
+                <div className="flex items-center justify-between py-2 border-b border-gray-50">
+                  <span className="text-sm text-gray-500">E-posta</span>
+                  <span className="text-sm font-semibold text-gray-800">{customer.email || '—'}</span>
+                </div>
+                <div className="flex items-center justify-between py-2">
+                  <span className="text-sm text-gray-500">Üyelik Tarihi</span>
+                  <span className="text-sm font-semibold text-gray-800">
+                    {customer.created_at ? new Date(customer.created_at).toLocaleDateString('tr-TR') : '—'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Çıkış Yap Butonu */}
+            <button
+              onClick={signOut}
+              className="w-full py-4 bg-red-50 border border-red-200 rounded-2xl text-red-600 font-semibold hover:bg-red-100 transition flex items-center justify-center gap-2"
+            >
+              <LogOut className="w-5 h-5" />
+              Çıkış Yap
+            </button>
+          </div>
+        )}
       </main>
+
+      {/* Fixed Bottom Navigation */}
+      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg z-50">
+        <div className="max-w-lg mx-auto flex">
+          <button
+            onClick={() => setActiveTab('qr')}
+            className={`flex-1 py-3 flex flex-col items-center gap-1 transition ${
+              activeTab === 'qr' ? 'text-emerald-600' : 'text-gray-400 hover:text-gray-600'
+            }`}
+          >
+            <QrCode className="w-5 h-5" />
+            <span className="text-xs font-medium">QR Kodum</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('esnaflar')}
+            className={`flex-1 py-3 flex flex-col items-center gap-1 transition ${
+              activeTab === 'esnaflar' ? 'text-emerald-600' : 'text-gray-400 hover:text-gray-600'
+            }`}
+          >
+            <Store className="w-5 h-5" />
+            <span className="text-xs font-medium">Esnaflar</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('gecmis')}
+            className={`flex-1 py-3 flex flex-col items-center gap-1 transition ${
+              activeTab === 'gecmis' ? 'text-emerald-600' : 'text-gray-400 hover:text-gray-600'
+            }`}
+          >
+            <History className="w-5 h-5" />
+            <span className="text-xs font-medium">Geçmiş</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('profilim')}
+            className={`flex-1 py-3 flex flex-col items-center gap-1 transition ${
+              activeTab === 'profilim' ? 'text-emerald-600' : 'text-gray-400 hover:text-gray-600'
+            }`}
+          >
+            <User className="w-5 h-5" />
+            <span className="text-xs font-medium">Profilim</span>
+          </button>
+        </div>
+      </nav>
     </div>
   );
 }

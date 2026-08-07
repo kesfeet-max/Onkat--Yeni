@@ -33,6 +33,7 @@ import {
   Phone,
   Trash2,
   Moon,
+  User,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -41,7 +42,8 @@ import { QREngine, CameraFacing, getSavedCameraPreference } from '../lib/qr-engi
 import { withRetry, resilientRpc, resilientQuery } from '../lib/retry';
 import { toast } from '../lib/toast';
 
-type MerchantTab = 'islem' | 'musteriler' | 'gecmis' | 'kasiyerler' | 'guvenlik' | 'ayarlar';
+type MerchantTab = 'islem' | 'musteriler' | 'gecmis' | 'profilim';
+type ProfileSubTab = 'bilgilerim' | 'kasiyerler' | 'guvenlik' | 'ayarlar';
 
 interface CustomerInfo {
   customer_id: string;
@@ -78,6 +80,7 @@ export function MerchantPanel() {
   const { user, profile, loading: authLoading, signOut } = useAuth();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<MerchantTab>('islem');
+  const [profileSubTab, setProfileSubTab] = useState<ProfileSubTab>('bilgilerim');
   const [loading, setLoading] = useState(true);
   const [transactions, setTransactions] = useState<TransactionRecord[]>([]);
   const [myCustomers, setMyCustomers] = useState<CustomerRecord[]>([]);
@@ -859,12 +862,6 @@ export function MerchantPanel() {
             <p className="text-emerald-200 text-xs font-medium uppercase tracking-wider">Onkatı Esnaf</p>
             <h1 className="text-xl font-bold mt-0.5">{merchant?.store_name || 'Esnaf Paneli'}</h1>
           </div>
-          <button
-            onClick={signOut}
-            className="p-2.5 rounded-xl bg-white/10 hover:bg-white/20 transition"
-          >
-            <LogOut className="w-5 h-5" />
-          </button>
         </div>
 
         {/* Günlük Özet */}
@@ -902,78 +899,6 @@ export function MerchantPanel() {
           </button>
         </div>
       )}
-
-      {/* Tab Navigation */}
-      <nav className="bg-white border-b shadow-sm sticky top-0 z-40">
-        <div className="flex overflow-x-auto scrollbar-hide">
-          <button
-            onClick={() => setActiveTab('islem')}
-            className={`flex-1 min-w-[60px] py-3 px-1 text-center text-[10px] font-semibold border-b-3 transition ${
-              activeTab === 'islem'
-                ? 'border-emerald-600 text-emerald-700 bg-emerald-50/50'
-                : 'border-transparent text-gray-500'
-            }`}
-          >
-            <QrCode className="w-4 h-4 mx-auto mb-0.5" />
-            İşlem
-          </button>
-          <button
-            onClick={() => setActiveTab('musteriler')}
-            className={`flex-1 min-w-[60px] py-3 px-1 text-center text-[10px] font-semibold border-b-3 transition ${
-              activeTab === 'musteriler'
-                ? 'border-emerald-600 text-emerald-700 bg-emerald-50/50'
-                : 'border-transparent text-gray-500'
-            }`}
-          >
-            <Users className="w-4 h-4 mx-auto mb-0.5" />
-            Müşteriler
-          </button>
-          <button
-            onClick={() => setActiveTab('gecmis')}
-            className={`flex-1 min-w-[60px] py-3 px-1 text-center text-[10px] font-semibold border-b-3 transition ${
-              activeTab === 'gecmis'
-                ? 'border-emerald-600 text-emerald-700 bg-emerald-50/50'
-                : 'border-transparent text-gray-500'
-            }`}
-          >
-            <History className="w-4 h-4 mx-auto mb-0.5" />
-            Geçmiş
-          </button>
-          <button
-            onClick={() => setActiveTab('kasiyerler')}
-            className={`flex-1 min-w-[60px] py-3 px-1 text-center text-[10px] font-semibold border-b-3 transition ${
-              activeTab === 'kasiyerler'
-                ? 'border-emerald-600 text-emerald-700 bg-emerald-50/50'
-                : 'border-transparent text-gray-500'
-            }`}
-          >
-            <UserPlus className="w-4 h-4 mx-auto mb-0.5" />
-            Kasiyerler
-          </button>
-          <button
-            onClick={() => setActiveTab('guvenlik')}
-            className={`flex-1 min-w-[60px] py-3 px-1 text-center text-[10px] font-semibold border-b-3 transition ${
-              activeTab === 'guvenlik'
-                ? 'border-emerald-600 text-emerald-700 bg-emerald-50/50'
-                : 'border-transparent text-gray-500'
-            }`}
-          >
-            <Shield className="w-4 h-4 mx-auto mb-0.5" />
-            Güvenlik
-          </button>
-          <button
-            onClick={() => setActiveTab('ayarlar')}
-            className={`flex-1 min-w-[60px] py-3 px-1 text-center text-[10px] font-semibold border-b-3 transition ${
-              activeTab === 'ayarlar'
-                ? 'border-emerald-600 text-emerald-700 bg-emerald-50/50'
-                : 'border-transparent text-gray-500'
-            }`}
-          >
-            <Settings className="w-4 h-4 mx-auto mb-0.5" />
-            Ayarlar
-          </button>
-        </div>
-      </nav>
 
       {/* Content */}
       <main className="p-4 pb-24 max-w-lg mx-auto">
@@ -1561,8 +1486,72 @@ export function MerchantPanel() {
           );
         })()}
 
-        {/* Kasiyerler Tab */}
-        {activeTab === 'kasiyerler' && (
+        {/* Profilim Tab */}
+        {activeTab === 'profilim' && (
+          <div className="space-y-4">
+            {/* Profil Alt Sekme Navigasyonu */}
+            <div className="flex gap-1 bg-gray-100 rounded-xl p-1 overflow-x-auto">
+              {([
+                { key: 'bilgilerim', label: 'Bilgilerim', icon: User },
+                { key: 'kasiyerler', label: 'Kasiyerler', icon: UserPlus },
+                { key: 'guvenlik', label: 'Güvenlik', icon: Shield },
+                { key: 'ayarlar', label: 'Ayarlar', icon: Settings },
+              ] as { key: ProfileSubTab; label: string; icon: any }[]).map(({ key, label, icon: Icon }) => (
+                <button
+                  key={key}
+                  onClick={() => setProfileSubTab(key)}
+                  className={`flex-1 min-w-[70px] py-2 px-2 rounded-lg text-[11px] font-semibold flex flex-col items-center gap-0.5 transition ${
+                    profileSubTab === key
+                      ? 'bg-white text-emerald-700 shadow-sm'
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  <Icon className="w-4 h-4" />
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Bilgilerim Alt Sekmesi */}
+            {profileSubTab === 'bilgilerim' && (
+              <div className="space-y-4">
+                <h2 className="text-lg font-bold text-gray-800">Bilgilerim</h2>
+                <div className="bg-white rounded-2xl shadow-lg p-5 border border-gray-100 space-y-4">
+                  <div className="flex items-center gap-4">
+                    <div className="w-16 h-16 bg-gradient-to-br from-emerald-100 to-teal-100 rounded-full flex items-center justify-center">
+                      <Store className="w-8 h-8 text-emerald-600" />
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="font-bold text-gray-800">{merchant?.store_name || 'Mağaza Adı'}</h3>
+                      <p className="text-sm text-gray-500">{profile?.full_name || 'İsim'}</p>
+                      <p className="text-xs text-gray-400">{user?.email || ''}</p>
+                      <p className="text-xs text-gray-400">{profile?.phone || ''}</p>
+                    </div>
+                  </div>
+                  <div className="border-t pt-4 space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-500">Mağaza Kodu</span>
+                      <span className="font-mono font-semibold text-emerald-700">{merchant?.store_code || '-'}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-500">Nakit Puan Oranı</span>
+                      <span className="font-semibold">%{cashPointsRate}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-500">Kart Puan Oranı</span>
+                      <span className="font-semibold">%{cardPointsRate}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-500">Toplam Müşteri</span>
+                      <span className="font-semibold">{myCustomers.length}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Kasiyerler Alt Sekmesi */}
+            {profileSubTab === 'kasiyerler' && (
           <div className="space-y-4">
             <h2 className="text-lg font-bold text-gray-800">Kasiyer Yönetimi</h2>
 
@@ -1663,10 +1652,10 @@ export function MerchantPanel() {
               </p>
             </div>
           </div>
-        )}
+            )}
 
-        {/* Güvenlik & Mesai Tab */}
-        {activeTab === 'guvenlik' && (
+            {/* Güvenlik Alt Sekmesi */}
+            {profileSubTab === 'guvenlik' && (
           <div className="space-y-4">
             <h2 className="text-lg font-bold text-gray-800">Güvenlik & Mesai Ayarları</h2>
 
@@ -1770,10 +1759,10 @@ export function MerchantPanel() {
               Güvenlik Ayarlarını Kaydet
             </button>
           </div>
-        )}
+            )}
 
-        {/* Ayarlar Tab */}
-        {activeTab === 'ayarlar' && (
+            {/* Ayarlar Alt Sekmesi */}
+            {profileSubTab === 'ayarlar' && (
           <div className="space-y-4">
             <h2 className="text-lg font-bold text-gray-800">Puan Oranları</h2>
 
@@ -1848,8 +1837,71 @@ export function MerchantPanel() {
               </p>
             </div>
           </div>
+            )}
+
+            {/* Çıkış Yap Butonu */}
+            <div className="pt-4 border-t border-gray-200 mt-4">
+              <button
+                onClick={() => signOut()}
+                className="w-full py-3 bg-red-50 border border-red-200 text-red-600 rounded-xl font-semibold hover:bg-red-100 transition flex items-center justify-center gap-2"
+              >
+                <LogOut className="w-5 h-5" />
+                Çıkış Yap
+              </button>
+            </div>
+          </div>
         )}
       </main>
+
+      {/* Fixed Bottom Navigation */}
+      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-[0_-4px_12px_rgba(0,0,0,0.08)] z-50">
+        <div className="flex max-w-lg mx-auto">
+          <button
+            onClick={() => setActiveTab('islem')}
+            className={`flex-1 py-3 flex flex-col items-center gap-0.5 transition ${
+              activeTab === 'islem'
+                ? 'text-emerald-700'
+                : 'text-gray-400'
+            }`}
+          >
+            <QrCode className="w-5 h-5" />
+            <span className="text-[10px] font-semibold">İşlem</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('musteriler')}
+            className={`flex-1 py-3 flex flex-col items-center gap-0.5 transition ${
+              activeTab === 'musteriler'
+                ? 'text-emerald-700'
+                : 'text-gray-400'
+            }`}
+          >
+            <Users className="w-5 h-5" />
+            <span className="text-[10px] font-semibold">Müşteriler</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('gecmis')}
+            className={`flex-1 py-3 flex flex-col items-center gap-0.5 transition ${
+              activeTab === 'gecmis'
+                ? 'text-emerald-700'
+                : 'text-gray-400'
+            }`}
+          >
+            <History className="w-5 h-5" />
+            <span className="text-[10px] font-semibold">Geçmiş</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('profilim')}
+            className={`flex-1 py-3 flex flex-col items-center gap-0.5 transition ${
+              activeTab === 'profilim'
+                ? 'text-emerald-700'
+                : 'text-gray-400'
+            }`}
+          >
+            <User className="w-5 h-5" />
+            <span className="text-[10px] font-semibold">Profilim</span>
+          </button>
+        </div>
+      </nav>
     </div>
   );
 }
