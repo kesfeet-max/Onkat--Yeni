@@ -189,18 +189,15 @@ export function MerchantPanel() {
   const handleSaveProfile = async () => {
     setSavingProfile(true);
     try {
-      // Profil tablosunu güncelle (full_name, phone)
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .update({ full_name: profileForm.full_name, phone: profileForm.phone })
-        .eq('id', user!.id);
-      if (profileError) throw profileError;
-
-      // Mağaza adını güncelle
+      // Merchants tablosunu güncelle (full_name, phone, store_name)
       if (merchant?.id) {
         const { error: merchantError } = await supabase
           .from('merchants')
-          .update({ store_name: profileForm.store_name })
+          .update({
+            full_name: profileForm.full_name,
+            phone: profileForm.phone,
+            store_name: profileForm.store_name
+          })
           .eq('id', merchant.id);
         if (merchantError) throw merchantError;
       }
