@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { supabase } from '../lib/supabase';
+import { toast } from '../lib/toast';
 import { formatCurrency, formatDate } from '../lib/utils';
 import { QREngine, CameraFacing, getSavedCameraPreference } from '../lib/qr-engine';
 import QRCode from 'qrcode';
@@ -161,12 +162,14 @@ export function CustomerPanel() {
   const handleSaveCustomerProfile = async () => {
     setSavingCustomerProfile(true);
     try {
-      // Profil tablosunu güncelle (phone)
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .update({ phone: customerProfileForm.phone })
-        .eq('id', user!.id);
-      if (profileError) throw profileError;
+      // Customers tablosunu güncelle (phone)
+      if (customer?.id) {
+        const { error: customerError } = await supabase
+          .from('customers')
+          .update({ phone: customerProfileForm.phone })
+          .eq('id', customer.id);
+        if (customerError) throw customerError;
+      }
 
       // E-posta güncelle
       if (customerProfileForm.email && customerProfileForm.email !== user!.email) {
@@ -181,11 +184,9 @@ export function CustomerPanel() {
         setCustomerProfileForm(prev => ({ ...prev, new_password: '' }));
       }
 
-      setMessage({ type: 'success', text: 'Bilgileriniz başarıyla güncellendi' });
-      setTimeout(() => setMessage(null), 3000);
+      toast.success('Bilgileriniz başarıyla güncellendi');
     } catch (err: any) {
-      setMessage({ type: 'error', text: err.message || 'Güncelleme sırasında hata oluştu' });
-      setTimeout(() => setMessage(null), 4000);
+      toast.error(err.message || 'Güncelleme sırasında hata oluştu');
     } finally {
       setSavingCustomerProfile(false);
     }
