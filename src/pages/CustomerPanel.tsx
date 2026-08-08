@@ -107,6 +107,12 @@ export function CustomerPanel() {
   const [loadingNotifications, setLoadingNotifications] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
 
+  // Push Bildirim State
+  const [pushPermission, setPushPermission] = useState<NotificationPermission>(
+    'Notification' in window ? Notification.permission : 'denied'
+  );
+  const [pushSubscribing, setPushSubscribing] = useState(false);
+
   // Müşteri Profil Düzenleme Form State
   const [customerProfileForm, setCustomerProfileForm] = useState({
     full_name: '',
@@ -261,6 +267,63 @@ export function CustomerPanel() {
       await handleMarkAsRead(id);
     }
   };
+
+  // Push Bildirim İzni İste ve Abone Ol
+  const handleEnablePushNotifications = async () => {
+    if (!('Notification' in window) || !('serviceWorker' in navigator)) {
+      toast.error('Tarayıcınız push bildirimleri desteklemiyor');
+      return;
+    }
+
+    setPushSubscribing(true);
+    try {
+      const permission = await Notification.requestPermission();
+      setPushPermission(permission);
+
+      if (permission === 'granted') {
+        // Service Worker hazır olana kadar bekle
+        const registration = await navigator.serviceWorker.ready;
+
+        // Push subscription oluşturmayı dene
+        let subscription = await registration.pushManager.getSubscription();
+
+        // Subscription'ı sunucuya kaydet
+        if (subscription) {
+          await supabase.rpc('push_abonelik_kaydet', {
+            p_subscription: JSON.stringify(subscription.toJSON()),
+            p_endpoint: subscription.endpoint,
+          });
+        }
+
+        toast.success('Bildirimler açıldı! Artık kampanya bildirimleri alacaksınız.');
+
+        // Test bildirimi gönder
+        await registration.showNotification('🔔 Onkatı Bildirimleri Aktif!', {
+          body: 'Artık esnaflardan gelen kampanya bildirimlerini anında alacaksınız.',
+          icon: '/favicon.svg',
+          badge: '/favicon.svg',
+          vibrate: [200, 100, 200],
+          tag: 'push-enabled-test',
+          renotify: true,
+          silent: false,
+        });
+      } else if (permission === 'denied') {
+        toast.error('Bildirim izni reddedildi. Tarayıcı ayarlarından izin verebilirsiniz.');
+      }
+    } catch (err: any) {
+      toast.error('Bildirim ayarlanırken hata oluştu');
+      console.warn('Push notification error:', err);
+    } finally {
+      setPushSubscribing(false);
+    }
+  };
+
+  // Sayfa yüklendiğinde push durumunu kontrol et
+  useEffect(() => {
+    if ('Notification' in window) {
+      setPushPermission(Notification.permission);
+    }
+  }, []);
 
   // Realtime
   useEffect(() => {
@@ -1203,6 +1266,43 @@ export function CustomerPanel() {
         {/* Duyurular Tab */}
         {activeTab === 'duyurular' && (
           <div className="space-y-4">
+            {/* Push Bildirim İzin Banner'ı */}
+            {pushPermission !== 'granted' && (
+              <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-2xl p-4 shadow-lg">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center shrink-0">
+                    <Bell className="w-5 h-5 text-white" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-bold text-white">Bildirimleri Açın!</p>
+                    <p className="text-xs text-white/80 mt-0.5">
+                      Kampanya ve fırsatlardan anında haberdar olmak için bildirimlere izin verin.
+                    </p>
+                    <button
+                      onClick={handleEnablePushNotifications}
+                      disabled={pushSubscribing}
+                      className="mt-2.5 px-4 py-2 bg-white text-purple-700 rounded-xl text-xs font-bold hover:bg-gray-50 transition disabled:opacity-50 flex items-center gap-1.5"
+                    >
+                      {pushSubscribing ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Bell className="w-3.5 h-3.5" />
+                      )}
+                      {pushSubscribing ? 'Ayarlanıyor...' : 'Bildirimleri Aç'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Bildirimler Aktif Rozeti */}
+            {pushPermission === 'granted' && (
+              <div className="flex items-center gap-2 px-3 py-2 bg-green-50 border border-green-200 rounded-xl">
+                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                <span className="text-xs font-medium text-green-700">Push bildirimleri aktif — kampanyalar anında telefonunuza düşecek</span>
+              </div>
+            )}
+
             {/* Başlık ve Tümünü Okundu İşaretle */}
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
@@ -1266,6 +1366,42 @@ export function CustomerPanel() {
                         {notif.description && (
                           <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{notif.description}</p>
                         )}
+
+                        {/* Kampanya Gün ve Saat Bilgisi */}
+                        {(notif.starts_at || notif.ends_at) && (
+                          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                            {notif.starts_at && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 border border-emerald-200 rounded-lg text-[10px] font-medium text-emerald-700">
+                                <CalendarDays className="w-3 h-3" />
+                                {new Date(notif.starts_at).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' })}
+                                {' '}
+                                {new Date(notif.starts_at).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            )}
+                            {notif.starts_at && notif.ends_at && (
+                              <span className="text-[10px] text-gray-400">→</span>
+                            )}
+                            {notif.ends_at && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-red-50 border border-red-200 rounded-lg text-[10px] font-medium text-red-700">
+                                <CalendarDays className="w-3 h-3" />
+                                {new Date(notif.ends_at).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' })}
+                                {' '}
+                                {new Date(notif.ends_at).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            )}
+                            {/* Aktif/Süresi Dolmuş Rozeti */}
+                            {notif.ends_at && new Date(notif.ends_at) > new Date() ? (
+                              <span className="px-1.5 py-0.5 bg-green-100 text-green-700 rounded text-[9px] font-bold">
+                                AKTİF
+                              </span>
+                            ) : notif.ends_at ? (
+                              <span className="px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded text-[9px] font-bold">
+                                SONA ERDİ
+                              </span>
+                            ) : null}
+                          </div>
+                        )}
+
                         <div className="flex items-center gap-2 mt-2 text-[10px] text-gray-400">
                           <CalendarDays className="w-3 h-3" />
                           <span>{new Date(notif.created_at).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>

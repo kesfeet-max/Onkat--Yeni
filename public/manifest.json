@@ -15,5 +15,7 @@
       "purpose": "any maskable"
     }
   ],
-  "categories": ["business", "finance", "shopping"]
+  "categories": ["business", "finance", "shopping"],
+  "permissions": ["notifications"],
+  "gcm_sender_id": "103953800507"
 }

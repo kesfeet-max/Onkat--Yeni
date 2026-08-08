@@ -1,4 +1,4 @@
-const CACHE_NAME = 'onkati-v1';
+const CACHE_NAME = 'onkati-v2';
 const STATIC_ASSETS = [
   '/',
   '/favicon.svg',
@@ -46,29 +46,60 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
-// Push notifications
+// Push notifications - Sesli ve yüksek öncelikli
 self.addEventListener('push', (event) => {
   const data = event.data ? event.data.json() : {};
-  const title = data.title || 'Onkati Bildirim';
+  const title = data.title || 'Onkatı - Yeni Bildirim';
   const options = {
-    body: data.body || 'Yeni bir bildiriminiz var!',
+    body: data.body || 'Yeni bir kampanya bildiriminiz var!',
     icon: '/favicon.svg',
     badge: '/favicon.svg',
-    vibrate: [100, 50, 100],
-    data: { url: data.url || '/' }
+    vibrate: [200, 100, 200, 100, 200],
+    tag: data.tag || 'onkati-campaign-' + Date.now(),
+    renotify: true,
+    requireInteraction: true,
+    silent: false,
+    data: {
+      url: data.url || '/dashboard',
+      campaign_id: data.campaign_id || null,
+      timestamp: Date.now()
+    },
+    actions: [
+      { action: 'open', title: 'Görüntüle' },
+      { action: 'dismiss', title: 'Kapat' }
+    ]
   };
-  event.waitUntil(self.registration.showNotification(title, options));
+
+  event.waitUntil(
+    self.registration.showNotification(title, options)
+  );
 });
 
+// Bildirime tıklama
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const url = event.notification.data?.url || '/';
+
+  const action = event.action;
+  if (action === 'dismiss') return;
+
+  const url = event.notification.data?.url || '/dashboard';
+
   event.waitUntil(
-    self.clients.matchAll({ type: 'window' }).then((clients) => {
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      // Zaten açık bir pencere varsa ona odaklan
       for (const client of clients) {
-        if (client.url === url && 'focus' in client) return client.focus();
+        if (client.url.includes(self.location.origin) && 'focus' in client) {
+          client.navigate(url);
+          return client.focus();
+        }
       }
+      // Yoksa yeni pencere aç
       return self.clients.openWindow(url);
     })
   );
+});
+
+// Bildirim kapandığında
+self.addEventListener('notificationclose', (event) => {
+  // Analytics veya loglama yapılabilir
 });

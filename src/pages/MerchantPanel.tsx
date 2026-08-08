@@ -712,20 +712,37 @@ export function MerchantPanel() {
         setShowCampaignForm(false);
         fetchCampaigns();
 
-        // Web Push Notification tetikle (müşteri tarafında service worker varsa)
+        // Web Push Notification tetikle - sesli ve yüksek öncelikli
         if ('serviceWorker' in navigator && 'Notification' in window && Notification.permission === 'granted') {
           try {
             const reg = await navigator.serviceWorker.ready;
-            await reg.showNotification('Onkatı - Yeni Kampanya', {
-              body: campaignForm.title,
-              icon: '/favicon.ico',
-              badge: '/favicon.ico',
-              vibrate: [200, 100, 200],
+            await reg.showNotification('🎉 Onkatı - Yeni Kampanya!', {
+              body: `${campaignForm.title}\n${r.notifications_sent || 0} müşteriye gönderildi`,
+              icon: '/favicon.svg',
+              badge: '/favicon.svg',
+              vibrate: [200, 100, 200, 100, 200],
               tag: 'campaign-' + r.campaign_id,
+              renotify: true,
+              requireInteraction: true,
+              silent: false,
+              data: {
+                url: '/dashboard',
+                campaign_id: r.campaign_id,
+                timestamp: Date.now()
+              },
             });
           } catch {
             // Push notification gönderilemezse sessizce devam
           }
+        }
+
+        // Sunucu tarafı push tetikleme (hedef müşterilere)
+        try {
+          await supabase.rpc('kampanya_push_tetikle', {
+            p_campaign_id: r.campaign_id,
+          });
+        } catch {
+          // Sessizce devam
         }
       } else {
         const errMsg = r?.error || error?.message || 'Kampanya oluşturulamadı';
