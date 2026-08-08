@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Handshake, Lock, AlertCircle, CheckCircle, Eye, EyeOff } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { toast } from '../lib/toast';
 
 export function ResetPasswordPage() {
   const [searchParams] = useSearchParams();
@@ -15,36 +16,85 @@ export function ResetPasswordPage() {
   const [sessionChecked, setSessionChecked] = useState(false);
 
   useEffect(() => {
+    // Supabase şifre sıfırlama token'ını 3 farklı yoldan alabilir:
+    // 1. Hash fragment: #access_token=...&type=recovery (implicit flow)
+    // 2. Query params: ?access_token=...&type=recovery
+    // 3. PKCE code: ?code=... (yeni Supabase versiyonları)
+    // 4. onAuthStateChange PASSWORD_RECOVERY event'i
+    
+    let recoveryHandled = false;
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY' && session) {
+        // Supabase otomatik olarak recovery token'ı işledi ve session oluşturdu
+        recoveryHandled = true;
+        setSessionChecked(true);
+      }
+    });
+
     const checkSession = async () => {
+      // Kısa bir süre bekle — onAuthStateChange PASSWORD_RECOVERY event'ini yakalaması için
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      if (recoveryHandled) return;
+
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
         setSessionChecked(true);
-      } else {
-        // Check if we have access token in URL (from password reset email)
-        const accessToken = searchParams.get('access_token');
-        const refreshToken = searchParams.get('refresh_token');
-        const type = searchParams.get('type');
+        return;
+      }
 
-        if (accessToken && type === 'recovery') {
-          // Set the session using the tokens from URL
-          const { error } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken || '',
-          });
-          if (!error) {
-            setSessionChecked(true);
-          } else {
-            setError('Link geçersiz veya süresi dolmuş. Lütfen yeni bir şifre sıfırlama linki isteyin.');
-            setSessionChecked(true);
-          }
+      // Hash fragment'tan token kontrolü (#access_token=...&type=recovery)
+      const hashParams = new URLSearchParams(window.location.hash.substring(1));
+      const hashAccessToken = hashParams.get('access_token');
+      const hashRefreshToken = hashParams.get('refresh_token');
+      const hashType = hashParams.get('type');
+
+      // Query params'tan token kontrolü (?access_token=...&type=recovery)
+      const queryAccessToken = searchParams.get('access_token');
+      const queryRefreshToken = searchParams.get('refresh_token');
+      const queryType = searchParams.get('type');
+      const queryCode = searchParams.get('code');
+
+      const accessToken = hashAccessToken || queryAccessToken;
+      const refreshToken = hashRefreshToken || queryRefreshToken || '';
+      const type = hashType || queryType;
+
+      if (accessToken && type === 'recovery') {
+        // Token ile session oluştur
+        const { error: sessionError } = await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        });
+        if (!sessionError) {
+          setSessionChecked(true);
         } else {
-          setError('Geçersiz şifre sıfırlama linki.');
+          setError('Link geçersiz veya süresi dolmuş. Lütfen yeni bir şifre sıfırlama linki isteyin.');
           setSessionChecked(true);
         }
+      } else if (queryCode) {
+        // PKCE flow — code ile token exchange (Supabase bunu otomatik yapar detectSessionInUrl ile)
+        // Biraz daha bekle, Supabase client otomatik exchange yapacak
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        const { data: { session: retrySession } } = await supabase.auth.getSession();
+        if (retrySession) {
+          setSessionChecked(true);
+        } else {
+          setError('Link geçersiz veya süresi dolmuş. Lütfen yeni bir şifre sıfırlama linki isteyin.');
+          setSessionChecked(true);
+        }
+      } else {
+        setError('Geçersiz şifre sıfırlama linki.');
+        setSessionChecked(true);
       }
     };
+
     checkSession();
-  }, [searchParams, navigate]);
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [searchParams]);
 
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -63,17 +113,20 @@ export function ResetPasswordPage() {
     setLoading(true);
 
     try {
-      const { error } = await supabase.auth.updateUser({
+      const { error: updateError } = await supabase.auth.updateUser({
         password: password
       });
 
-      if (error) {
-        setError('Şifre güncellenemedi: ' + error.message);
+      if (updateError) {
+        setError('Şifre güncellenemedi: ' + updateError.message);
       } else {
         setSuccess(true);
+        toast.success('Şifreniz başarıyla güncellendi!', 'Giriş sayfasına yönlendiriliyorsunuz...');
+        // Oturumu kapat — kullanıcı yeni şifresiyle tekrar giriş yapsın
+        await supabase.auth.signOut();
         setTimeout(() => {
           navigate('/giris');
-        }, 2000);
+        }, 2500);
       }
     } catch {
       setError('Bir hata oluştu. Lütfen tekrar deneyin.');

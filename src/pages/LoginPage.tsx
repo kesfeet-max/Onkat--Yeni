@@ -57,7 +57,7 @@ export function LoginPage() {
 
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail.trim(), {
-        redirectTo: 'https://onkat-e2hq.onrender.com/reset-password',
+        redirectTo: 'https://onkati.com/reset-password',
       });
 
       if (error) {
