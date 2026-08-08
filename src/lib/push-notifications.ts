@@ -117,11 +117,14 @@ export async function sendLocalNotification(title: string, options: {
 /**
  * Tüm aktif müşterilere kampanya bildirimi gönder
  * (Esnaf panelinden kampanya oluşturulduğunda çağrılır)
- * Gerçek Web Push: Supabase Edge Function üzerinden VAPID imzalı HTTP push
+ * Gerçek Web Push: Supabase Edge Function 'push-send' üzerinden VAPID imzalı HTTP push
+ * 
+ * Kullanım: supabase.functions.invoke ile resmi SDK çağrısı
+ * Auth token otomatik eklenir, URL doğru oluşturulur
  */
 export async function triggerCampaignNotification(campaignTitle: string, campaignId: string, storeName: string): Promise<{ sent: number; failed: number; total: number } | null> {
   try {
-    // Önce local push bildirim gönder (kendi cihazımızda test için)
+    // Önce local push bildirim gönder (esnafın kendi cihazında onay için)
     await sendLocalNotification(`🎉 ${storeName} - Yeni Kampanya!`, {
       body: campaignTitle,
       tag: `campaign-${campaignId}`,
@@ -129,34 +132,37 @@ export async function triggerCampaignNotification(campaignTitle: string, campaig
       campaign_id: campaignId,
     });
 
-    // Sunucu tarafı gerçek Web Push gönderimi (Edge Function)
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) return null;
-
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-
-    const response = await fetch(`${supabaseUrl}/functions/v1/push-send`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${session.access_token}`,
-      },
-      body: JSON.stringify({
+    // Sunucu tarafı gerçek Web Push gönderimi
+    // supabase.functions.invoke otomatik olarak:
+    // - Authorization header ekler (mevcut session token)
+    // - Doğru Edge Function URL'sini oluşturur
+    // - CORS ve content-type ayarlarını yapar
+    const { data, error } = await supabase.functions.invoke('push-send', {
+      body: {
         campaign_id: campaignId,
         title: `🎉 ${storeName} - Yeni Kampanya!`,
         message: campaignTitle,
-      }),
+      },
     });
 
-    if (response.ok) {
-      const result = await response.json();
-      console.log('[Push] Sunucu push sonucu:', result);
-      return { sent: result.sent || 0, failed: result.failed || 0, total: result.total || 0 };
-    } else {
-      const err = await response.text();
-      console.warn('[Push] Edge Function hatası:', response.status, err);
+    if (error) {
+      console.warn('[Push] Edge Function hatası:', error.message);
+      // Edge Function deploy edilmemişse veya erişilemezse
+      // Kullanıcıya sessizce devam et, konsola log yaz
+      console.warn('[Push] Edge Function "push-send" erişilemedi. Deploy edilmiş olduğundan emin olun.');
       return null;
     }
+
+    if (data) {
+      console.log('[Push] Sunucu push sonucu:', data);
+      return {
+        sent: data.sent || 0,
+        failed: data.failed || 0,
+        total: data.total || 0,
+      };
+    }
+
+    return null;
   } catch (error) {
     console.warn('[Push] Kampanya push tetikleme hatası:', error);
     return null;
