@@ -76,43 +76,9 @@ export async function saveSubscriptionToServer(subscription: PushSubscription): 
   }
 }
 
-/**
- * Lokal push bildirim gönder (Service Worker üzerinden)
- * Bu, sunucu push olmadan da çalışır - PWA local notification
- */
-export async function sendLocalNotification(title: string, options: {
-  body?: string;
-  tag?: string;
-  url?: string;
-  campaign_id?: string;
-}): Promise<boolean> {
-  try {
-    if (Notification.permission !== 'granted') return false;
-    
-    const registration = await navigator.serviceWorker.ready;
-    
-    await registration.showNotification(title, {
-      body: options.body || '',
-      icon: '/favicon.svg',
-      badge: '/favicon.svg',
-      vibrate: [200, 100, 200, 100, 200],
-      tag: options.tag || 'onkati-' + Date.now(),
-      renotify: true,
-      requireInteraction: true,
-      silent: false,
-      data: {
-        url: options.url || '/dashboard',
-        campaign_id: options.campaign_id || null,
-        timestamp: Date.now()
-      },
-    });
-    
-    return true;
-  } catch (error) {
-    console.warn('Local notification hatası:', error);
-    return false;
-  }
-}
+// sendLocalNotification KALDIRILDI
+// Client-side showNotification tarayıcıda "URL kopyalamak için dokunun" davranışını tetikler.
+// Tüm push bildirimleri yalnızca sunucu tarafından (Edge Function push-send) gönderilmelidir.
 
 /**
  * Tüm aktif müşterilere kampanya bildirimi gönder

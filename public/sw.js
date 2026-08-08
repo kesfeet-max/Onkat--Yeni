@@ -126,19 +126,22 @@ self.addEventListener('notificationclick', (event) => {
   const action = event.action;
   if (action === 'dismiss') return;
 
-  const url = event.notification.data?.url || event.notification.data?.openUrl || '/panel';
+  // data alanı yoksa bile güvenli fallback — "/panel" sayfasına yönlendir
+  const notifData = event.notification.data || {};
+  const url = notifData.url || notifData.openUrl || '/panel';
+  const targetUrl = url.startsWith('http') ? url : (self.location.origin + url);
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
       // Zaten açık bir pencere varsa ona odaklan ve navigate et
       for (const client of clients) {
         if (client.url.includes(self.location.origin) && 'focus' in client) {
-          client.navigate(url);
+          client.navigate(targetUrl);
           return client.focus();
         }
       }
       // Yoksa yeni pencere aç
-      return self.clients.openWindow(self.location.origin + url);
+      return self.clients.openWindow(targetUrl);
     })
   );
 });

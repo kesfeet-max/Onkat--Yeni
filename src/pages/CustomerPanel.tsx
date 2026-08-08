@@ -322,7 +322,7 @@ export function CustomerPanel() {
 
         toast.success('Bildirimler açıldı! Artık kampanya bildirimleri alacaksınız.');
 
-        // Test bildirimi gönder
+        // Test bildirimi gönder — data.url zorunlu, yoksa tarayıcı "URL kopyala" gösterir
         await registration.showNotification('🔔 Onkatı Bildirimleri Aktif!', {
           body: 'Artık esnaflardan gelen kampanya bildirimlerini anında alacaksınız.',
           icon: '/favicon.svg',
@@ -331,6 +331,11 @@ export function CustomerPanel() {
           tag: 'push-enabled-test',
           renotify: true,
           silent: false,
+          data: {
+            url: '/panel',
+            openUrl: '/panel',
+            timestamp: Date.now()
+          },
         });
       } else if (permission === 'denied') {
         toast.error('Bildirim izni reddedildi. Tarayıcı ayarlarından izin verebilirsiniz.');
