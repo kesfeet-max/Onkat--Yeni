@@ -28,6 +28,9 @@ export function RegisterPage() {
   const [isLocating, setIsLocating] = useState(false);
   const navigate = useNavigate();
 
+  const [kvkkApproved, setKvkkApproved] = useState(false);
+  const [termsApproved, setTermsApproved] = useState(false);
+
   const [formData, setFormData] = useState({
     phone: '',
     email: '',
@@ -60,6 +63,12 @@ export function RegisterPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+
+    if (!kvkkApproved || !termsApproved) {
+      setError('Devam etmek için KVKK Aydınlatma Metni ve Üyelik Koşullarını onaylamanız gerekmektedir.');
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -83,6 +92,8 @@ export function RegisterPage() {
           sector: formData.sector || undefined,
           latitude: formData.latitude || undefined,
           longitude: formData.longitude || undefined,
+          kvkk_approved: kvkkApproved,
+          terms_approved: termsApproved,
         }),
       });
 
@@ -335,9 +346,54 @@ export function RegisterPage() {
               </>
             )}
 
+            {/* Yasal Onay Kutuları */}
+            <div className="space-y-3 bg-gray-50 p-4 rounded-xl border border-gray-200">
+              <label className="flex items-start gap-3 cursor-pointer group">
+                <input
+                  type="checkbox"
+                  checked={kvkkApproved}
+                  onChange={(e) => setKvkkApproved(e.target.checked)}
+                  required
+                  className="mt-1 w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 flex-shrink-0"
+                />
+                <span className="text-sm text-gray-700 leading-relaxed">
+                  <a
+                    href="/yasal/kvkk"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary-600 font-semibold hover:text-primary-700 underline"
+                  >
+                    KVKK Aydınlatma Metni
+                  </a>
+                  'ni okudum ve onaylıyorum. <span className="text-red-500">*</span>
+                </span>
+              </label>
+
+              <label className="flex items-start gap-3 cursor-pointer group">
+                <input
+                  type="checkbox"
+                  checked={termsApproved}
+                  onChange={(e) => setTermsApproved(e.target.checked)}
+                  required
+                  className="mt-1 w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 flex-shrink-0"
+                />
+                <span className="text-sm text-gray-700 leading-relaxed">
+                  <a
+                    href={role === 'merchant' ? "/yasal/esnaf-kosullari" : "/yasal/musteri-kosullari"}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary-600 font-semibold hover:text-primary-700 underline"
+                  >
+                    {role === 'merchant' ? 'Esnaf Üyelik ve Hizmet Koşulları' : 'Müşteri Üyelik ve Hizmet Koşulları'}
+                  </a>
+                  'nı okudum ve kabul ediyorum. <span className="text-red-500">*</span>
+                </span>
+              </label>
+            </div>
+
             <button
               type="submit"
-              disabled={loading || (role === 'merchant' && !formData.latitude)}
+              disabled={loading || (role === 'merchant' && !formData.latitude) || !kvkkApproved || !termsApproved}
               className="w-full bg-primary-600 text-white py-4 rounded-xl font-semibold hover:bg-primary-700 transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {loading ? (

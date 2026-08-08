@@ -19,6 +19,8 @@ interface RegisterRequest {
   sector?: string;
   latitude?: number;
   longitude?: number;
+  kvkk_approved?: boolean;
+  terms_approved?: boolean;
 }
 
 Deno.serve(async (req: Request) => {
@@ -47,7 +49,20 @@ Deno.serve(async (req: Request) => {
     const body: RegisterRequest = await req.json();
     console.log('Received registration request:', JSON.stringify(body, null, 2));
 
-    const { role, phone, email, password, full_name, store_name, city, district, sector, latitude, longitude } = body;
+    const { role, phone, email, password, full_name, store_name, city, district, sector, latitude, longitude, kvkk_approved, terms_approved } = body;
+
+    // Yasal onay kontrolü — her iki kutucuk da işaretlenmiş olmalı
+    if (!kvkk_approved || !terms_approved) {
+      return new Response(JSON.stringify({ error: "KVKK Aydınlatma Metni ve Müşteri Üyelik Koşulları onaylanmadan kayıt yapılamaz." }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // IP adresini al (yasal kayıt için)
+    const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() 
+      || req.headers.get('x-real-ip') 
+      || req.headers.get('cf-connecting-ip') 
+      || 'unknown';
 
     // Validate required fields - check for empty/whitespace strings
     const trimmedFullName = (full_name || '').trim();
@@ -208,6 +223,16 @@ Deno.serve(async (req: Request) => {
         });
       }
 
+      // Yasal onay kaydını logla (müşteri)
+      await supabase.from('consent_logs').insert({
+        user_id: userId,
+        kvkk_approved_at: new Date().toISOString(),
+        terms_approved_at: new Date().toISOString(),
+        ip_address: clientIp,
+        user_agent: req.headers.get('user-agent') || 'unknown',
+        role: 'customer',
+      });
+
       console.log('Customer created successfully:', userId);
       return new Response(JSON.stringify({ success: true, message: "Kayıt başarılı", user_id: userId }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -242,6 +267,16 @@ Deno.serve(async (req: Request) => {
           status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
+
+      // Yasal onay kaydını logla (esnaf)
+      await supabase.from('consent_logs').insert({
+        user_id: userId,
+        kvkk_approved_at: new Date().toISOString(),
+        esnaf_terms_approved_at: new Date().toISOString(),
+        ip_address: clientIp,
+        user_agent: req.headers.get('user-agent') || 'unknown',
+        role: 'merchant',
+      });
 
       console.log('Merchant created successfully:', userId);
       return new Response(JSON.stringify({ success: true, message: "Kayıt başarılı", user_id: userId }), {

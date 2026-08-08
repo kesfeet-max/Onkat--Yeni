@@ -12,6 +12,10 @@ import { AdminLoginPage } from './pages/AdminLoginPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { QRTestPage } from './pages/QRTestPage';
 import { StorePage } from './pages/StorePage';
+import { KVKKPage } from './pages/KVKKPage';
+import { MusteriKosullariPage } from './pages/MusteriKosullariPage';
+import { EsnafKosullariPage } from './pages/EsnafKosullariPage';
+import { GizlilikPage } from './pages/GizlilikPage';
 
 function App() {
   return (
@@ -32,6 +36,10 @@ function App() {
               <Route path="/admin-giris" element={<AdminLoginPage />} />
               <Route path="/test-qr" element={<QRTestPage />} />
               <Route path="/magaza/:id" element={<StorePage />} />
+              <Route path="/yasal/kvkk" element={<KVKKPage />} />
+              <Route path="/yasal/musteri-kosullari" element={<MusteriKosullariPage />} />
+              <Route path="/yasal/esnaf-kosullari" element={<EsnafKosullariPage />} />
+              <Route path="/yasal/gizlilik" element={<GizlilikPage />} />
             </Route>
           </Routes>
         </RedirectProvider>
