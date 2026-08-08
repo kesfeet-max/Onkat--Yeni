@@ -1,33 +1,52 @@
-const CACHE_NAME = 'onkati-v3';
+/**
+ * Onkatı PWA Service Worker v4
+ * 
+ * ÖNEMLİ: Bu SW arka planda (PWA kapalıyken) push bildirimi almak için tasarlanmıştır.
+ * - skipWaiting() + clients.claim() ile eski SW anında değiştirilir
+ * - Push event'te showNotification çağrısı yapılır
+ * - notificationclick ile uygulama açılır/yönlendirilir
+ * - actions KULLANILMIYOR — bazı tarayıcılarda "URL kopyala" tetikler
+ */
+
+const CACHE_VERSION = 'onkati-v4';
 const STATIC_ASSETS = [
   '/',
   '/favicon.svg',
   '/manifest.json'
 ];
 
-// Install
+// ============================================================
+// INSTALL — Yeni SW hemen aktif olur (eski SW beklenmez)
+// ============================================================
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
+    caches.open(CACHE_VERSION).then((cache) => {
       return cache.addAll(STATIC_ASSETS);
     })
   );
+  // Eski SW'yi beklemeden hemen aktif ol
   self.skipWaiting();
 });
 
-// Activate
+// ============================================================
+// ACTIVATE — Eski cache'leri temizle ve tüm client'ları kontrol al
+// ============================================================
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => {
       return Promise.all(
-        keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
+        keys.filter((key) => key !== CACHE_VERSION).map((key) => caches.delete(key))
       );
+    }).then(() => {
+      // Tüm açık sekmeleri/client'ları bu SW'nin kontrolüne al
+      return self.clients.claim();
     })
   );
-  self.clients.claim();
 });
 
-// Fetch - Network first, fallback to cache
+// ============================================================
+// FETCH — Network first, fallback to cache
+// ============================================================
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   
@@ -35,7 +54,7 @@ self.addEventListener('fetch', (event) => {
     fetch(event.request)
       .then((response) => {
         const clone = response.clone();
-        caches.open(CACHE_NAME).then((cache) => {
+        caches.open(CACHE_VERSION).then((cache) => {
           cache.put(event.request, clone);
         });
         return response;
@@ -46,110 +65,106 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
-/**
- * PUSH EVENT — Gerçek Web Push bildirimi geldiğinde tetiklenir
- * 
- * Bu event YALNIZCA sunucudan (Edge Function push-send) VAPID imzalı
- * WebPush protokolü ile gönderilen mesajlarda tetiklenir.
- * 
- * Telefon kilitliyken, uygulama kapalıyken veya arka plandayken bile çalışır.
- * Heads-up notification (üstten açılır bildirim) için:
- * - requireInteraction: true
- * - vibrate pattern tanımlı
- * - silent: false (ses çalar)
- * - renotify: true (aynı tag ile bile tekrar bildirir)
- * - urgency: Edge Function'dan "high" olarak gönderilmeli (HTTP header)
- */
+// ============================================================
+// PUSH EVENT — Sunucudan VAPID imzalı WebPush geldiğinde tetiklenir
+// 
+// Bu event:
+// - Telefon kilitliyken çalışır
+// - Uygulama kapalıyken çalışır  
+// - Arka plandayken çalışır
+// - Tarayıcı tamamen kapalıyken bile çalışır (Android Chrome)
+//
+// NOT: actions dizisi KASITLI OLARAK KULLANILMIYOR.
+// Bazı tarayıcılar (özellikle Samsung Internet, bazı Android WebView)
+// actions desteklemediğinde fallback olarak "URL kopyalamak için dokunun"
+// gösterir. Bu yüzden sadece basit bildirim gösteriyoruz.
+// ============================================================
 self.addEventListener('push', (event) => {
   let data = {};
   
-  // Push payload'ı parse et
   if (event.data) {
     try {
       data = event.data.json();
     } catch (e) {
-      // JSON parse edilemezse text olarak al
-      data = { body: event.data.text() };
+      try {
+        data = { body: event.data.text() };
+      } catch (e2) {
+        data = { body: 'Yeni bir bildiriminiz var' };
+      }
     }
   }
 
   const title = data.title || '🔔 Onkatı - Yeni Bildirim';
   
+  // BASİT bildirim seçenekleri — actions YOK, sadece temel alanlar
+  // Bu, tarayıcının "URL kopyala" fallback davranışını engeller
   const options = {
     body: data.body || data.message || 'Yeni bir kampanya bildiriminiz var!',
     icon: data.icon || '/favicon.svg',
     badge: '/favicon.svg',
-    image: data.image || undefined, // Büyük resim (varsa)
-    
-    // Ses ve titreşim — heads-up notification için kritik
-    vibrate: [300, 100, 300, 100, 300], // Güçlü titreşim paterni
-    silent: false, // Ses AÇIK — telefon sesli moddaysa bildirim sesi çalar
-    
-    // Görünürlük ve etkileşim
-    requireInteraction: true, // Kullanıcı kapatana kadar bildirim ekranda kalır
-    renotify: true, // Aynı tag ile bile yeniden bildirim göster
-    tag: data.tag || 'onkati-campaign-' + Date.now(),
-    
-    // Zaman damgası — bildirimin ne zaman oluşturulduğunu gösterir
+    vibrate: [300, 100, 300, 100, 300],
+    silent: false,
+    requireInteraction: true,
+    renotify: true,
+    tag: data.tag || ('onkati-push-' + Date.now()),
     timestamp: data.timestamp || Date.now(),
-    
-    // Tıklama verisi
+    // data alanı — notificationclick'te kullanılır
     data: {
       url: data.url || '/panel',
+      openUrl: data.url || '/panel',
       campaign_id: data.campaign_id || null,
       store_name: data.store_name || '',
-      timestamp: Date.now(),
-      // Uygulamayı açmak için gerekli bilgiler
-      openUrl: data.url || '/panel'
-    },
-    
-    // Aksiyon butonları
-    actions: [
-      { action: 'open', title: '📋 Görüntüle', icon: '/favicon.svg' },
-      { action: 'dismiss', title: '✕ Kapat' }
-    ]
+      timestamp: Date.now()
+    }
+    // NOT: actions dizisi KASITLI olarak eklenmedi
+    // Bazı tarayıcılar actions'ı desteklemediğinde "URL kopyala" gösterir
   };
 
-  // showNotification çağrısı — bu, OS bildirim paneline düşer
   event.waitUntil(
     self.registration.showNotification(title, options)
   );
 });
 
-/**
- * Bildirime tıklama — kullanıcı bildirimi tıkladığında
- * Uygulamayı açar veya mevcut pencereye odaklanır
- */
+// ============================================================
+// NOTIFICATION CLICK — Bildirime tıklandığında uygulama açılır
+// ============================================================
 self.addEventListener('notificationclick', (event) => {
+  // Bildirimi kapat
   event.notification.close();
 
-  const action = event.action;
-  if (action === 'dismiss') return;
-
-  // data alanı yoksa bile güvenli fallback — "/panel" sayfasına yönlendir
+  // data alanından URL al — yoksa /panel'e yönlendir
   const notifData = event.notification.data || {};
-  const url = notifData.url || notifData.openUrl || '/panel';
-  const targetUrl = url.startsWith('http') ? url : (self.location.origin + url);
+  const path = notifData.url || notifData.openUrl || '/panel';
+  const targetUrl = path.startsWith('http') ? path : (self.location.origin + path);
 
   event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
-      // Zaten açık bir pencere varsa ona odaklan ve navigate et
-      for (const client of clients) {
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      // Açık bir pencere varsa ona odaklan ve yönlendir
+      for (const client of clientList) {
         if (client.url.includes(self.location.origin) && 'focus' in client) {
-          client.navigate(targetUrl);
-          return client.focus();
+          return client.navigate(targetUrl).then(() => client.focus());
         }
       }
-      // Yoksa yeni pencere aç
+      // Hiç pencere yoksa yeni pencere aç
       return self.clients.openWindow(targetUrl);
     })
   );
 });
 
-/**
- * Push subscription değişikliği — tarayıcı subscription'ı yenilediğinde
- * Yeni subscription'ı sunucuya kaydetmek için client'a mesaj gönder
- */
+// ============================================================
+// NOTIFICATION CLOSE — Bildirim kapatıldığında (analytics için)
+// ============================================================
+self.addEventListener('notificationclose', (event) => {
+  const data = event.notification.data;
+  if (data && data.campaign_id) {
+    console.log('[SW] Bildirim kapatıldı, campaign:', data.campaign_id);
+  }
+});
+
+// ============================================================
+// PUSH SUBSCRIPTION CHANGE — Tarayıcı subscription yenilediğinde
+// Client'a mesaj gönderir, client yeni subscription'ı sunucuya kaydeder
+// ============================================================
 self.addEventListener('pushsubscriptionchange', (event) => {
   event.waitUntil(
     self.clients.matchAll({ type: 'window' }).then((clients) => {
@@ -162,14 +177,4 @@ self.addEventListener('pushsubscriptionchange', (event) => {
       });
     })
   );
-});
-
-// Bildirim kapandığında (analytics için)
-self.addEventListener('notificationclose', (event) => {
-  // İleride analytics veya loglama yapılabilir
-  const data = event.notification.data;
-  if (data?.campaign_id) {
-    // Campaign bildirim kapatma logu
-    console.log('[SW] Bildirim kapatıldı:', data.campaign_id);
-  }
 });

@@ -21,8 +21,32 @@
     <script type="module" src="/src/main.tsx"></script>
     <script>
       if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js').catch(() => {});
+        window.addEventListener('load', async () => {
+          try {
+            // updateViaCache: 'none' — tarayıcı SW dosyasını cache'lemez,
+            // her zaman sunucudan yeni versiyonu kontrol eder
+            const reg = await navigator.serviceWorker.register('/sw.js', {
+              updateViaCache: 'none'
+            });
+            
+            // Yeni SW varsa hemen güncelle (skipWaiting SW içinde de var)
+            reg.addEventListener('updatefound', () => {
+              const newWorker = reg.installing;
+              if (newWorker) {
+                newWorker.addEventListener('statechange', () => {
+                  if (newWorker.state === 'activated') {
+                    // Yeni SW aktif — sayfa yenilenirse yeni SW kullanılır
+                    console.log('[SW] Yeni Service Worker aktif edildi');
+                  }
+                });
+              }
+            });
+
+            // Her sayfa yüklemesinde güncelleme kontrolü yap
+            reg.update().catch(() => {});
+          } catch (err) {
+            // SW kaydedilemezse sessizce devam et
+          }
         });
       }
     </script>
