@@ -124,15 +124,10 @@ export async function sendLocalNotification(title: string, options: {
  */
 export async function triggerCampaignNotification(campaignTitle: string, campaignId: string, storeName: string): Promise<{ sent: number; failed: number; total: number } | null> {
   try {
-    // Önce local push bildirim gönder (esnafın kendi cihazında onay için)
-    await sendLocalNotification(`🎉 ${storeName} - Yeni Kampanya!`, {
-      body: campaignTitle,
-      tag: `campaign-${campaignId}`,
-      url: '/dashboard',
-      campaign_id: campaignId,
-    });
-
-    // Sunucu tarafı gerçek Web Push gönderimi
+    // Sunucu tarafı gerçek Web Push gönderimi (Edge Function)
+    // Local showNotification KULLANILMIYOR — tarayıcının "URL kopyala" davranışını tetikler
+    // Gerçek push bildirimi yalnızca sunucudan VAPID imzalı WebPush ile gönderilmeli
+    //
     // supabase.functions.invoke otomatik olarak:
     // - Authorization header ekler (mevcut session token)
     // - Doğru Edge Function URL'sini oluşturur

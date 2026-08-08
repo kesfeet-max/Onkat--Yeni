@@ -400,15 +400,18 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Push payload
+    // Push payload — SW'nin push event'inde JSON olarak parse edilir
+    // url: Bildirime tıklandığında açılacak sayfa
     const pushPayload = JSON.stringify({
       title: title || `🎉 ${merchant.store_name} - Yeni Kampanya!`,
       body: message || campaign.title || campaign.description,
+      message: message || campaign.title || campaign.description,
       icon: '/favicon.svg',
       badge: '/favicon.svg',
       tag: `campaign-${campaign_id}`,
-      url: '/dashboard',
+      url: '/panel',
       campaign_id: campaign_id,
+      store_name: merchant.store_name,
       timestamp: Date.now(),
     });
 
