@@ -24,6 +24,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const fetchingRef = useRef(false);
   const mountedRef = useRef(true);
+  const initializedRef = useRef(false);
 
   const fetchProfile = useCallback(async (userId: string): Promise<CustomerProfile | MerchantProfile | null> => {
     if (fetchingRef.current) return null;
@@ -107,72 +108,158 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(false);
   }, []);
 
+  // Oturum state'ini session'dan güncelle
+  const updateSessionState = useCallback(async (session: any) => {
+    if (!session?.user) {
+      if (mountedRef.current) {
+        setUser(null);
+        setProfile(null);
+        setUserRole(null);
+        setLoading(false);
+      }
+      return;
+    }
+
+    const authUser: User = {
+      id: session.user.id,
+      email: session.user.email,
+      phone: session.user.user_metadata?.phone,
+      role: session.user.user_metadata?.role,
+    };
+
+    if (mountedRef.current) {
+      setUser(authUser);
+    }
+
+    const userProfile = await fetchProfile(session.user.id);
+    if (mountedRef.current) {
+      setProfile(userProfile);
+      if (!userProfile && session.user.user_metadata?.role) {
+        setUserRole(session.user.user_metadata.role as UserRole);
+      }
+      setLoading(false);
+    }
+  }, [fetchProfile]);
+
   useEffect(() => {
     mountedRef.current = true;
 
     const initializeAuth = async () => {
+      // Çift başlatmayı önle
+      if (initializedRef.current) return;
+      initializedRef.current = true;
+
       try {
+        // localStorage'dan mevcut session'ı oku
         const { data: { session } } = await supabase.auth.getSession();
 
         if (session?.user && mountedRef.current) {
-          const authUser: User = {
-            id: session.user.id,
-            email: session.user.email,
-            phone: session.user.user_metadata?.phone,
-            role: session.user.user_metadata?.role,
-          };
-          setUser(authUser);
-
-          const userProfile = await fetchProfile(session.user.id);
-          if (mountedRef.current) {
-            setProfile(userProfile);
-            if (!userProfile && session.user.user_metadata?.role) {
-              setUserRole(session.user.user_metadata.role as UserRole);
-            }
-          }
+          await updateSessionState(session);
+        } else {
+          // Session yok — loading'i kapat
+          if (mountedRef.current) setLoading(false);
         }
       } catch (err) {
         console.error('Auth initialization error:', err);
-        if (mountedRef.current) setError('Kimlik doğrulama hatası');
-      } finally {
-        if (mountedRef.current) setLoading(false);
+        if (mountedRef.current) {
+          setError('Kimlik doğrulama hatası');
+          setLoading(false);
+        }
       }
     };
 
     initializeAuth();
 
+    // Auth state değişikliklerini dinle
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (!mountedRef.current) return;
 
-      if (event === 'SIGNED_OUT') {
-        setUser(null);
-        setProfile(null);
-        setUserRole(null);
-      } else if (event === 'SIGNED_IN' && session?.user) {
-        const authUser: User = {
-          id: session.user.id,
-          email: session.user.email,
-          phone: session.user.user_metadata?.phone,
-          role: session.user.user_metadata?.role,
-        };
-        setUser(authUser);
-        // Profil çekmeyi hemen başlat — loading zaten true
-        fetchProfile(session.user.id).then((userProfile) => {
-          if (mountedRef.current) {
-            setProfile(userProfile);
-            if (!userProfile && session.user.user_metadata?.role) {
-              setUserRole(session.user.user_metadata.role as UserRole);
+      console.log('[Auth] Event:', event);
+
+      switch (event) {
+        case 'SIGNED_OUT':
+          setUser(null);
+          setProfile(null);
+          setUserRole(null);
+          setLoading(false);
+          break;
+
+        case 'SIGNED_IN':
+        case 'TOKEN_REFRESHED':
+          // Token yenilendiğinde veya giriş yapıldığında state'i güncelle
+          if (session?.user) {
+            const authUser: User = {
+              id: session.user.id,
+              email: session.user.email,
+              phone: session.user.user_metadata?.phone,
+              role: session.user.user_metadata?.role,
+            };
+            setUser(authUser);
+
+            // Profil sadece SIGNED_IN'de çekilsin (TOKEN_REFRESHED'da gereksiz)
+            if (event === 'SIGNED_IN') {
+              fetchProfile(session.user.id).then((userProfile) => {
+                if (mountedRef.current) {
+                  setProfile(userProfile);
+                  if (!userProfile && session.user.user_metadata?.role) {
+                    setUserRole(session.user.user_metadata.role as UserRole);
+                  }
+                }
+              });
             }
           }
-        });
+          break;
+
+        case 'USER_UPDATED':
+          // Kullanıcı bilgileri güncellendi
+          if (session?.user) {
+            const authUser: User = {
+              id: session.user.id,
+              email: session.user.email,
+              phone: session.user.user_metadata?.phone,
+              role: session.user.user_metadata?.role,
+            };
+            setUser(authUser);
+          }
+          break;
       }
     });
+
+    // PWA Visibility Change Handler
+    // Uygulama arka plandan döndüğünde session'ı proaktif olarak kontrol et
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === 'visible' && mountedRef.current) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user) {
+            // Session hâlâ geçerli — user state'ini güncelle (token yenilenmiş olabilir)
+            const authUser: User = {
+              id: session.user.id,
+              email: session.user.email,
+              phone: session.user.user_metadata?.phone,
+              role: session.user.user_metadata?.role,
+            };
+            setUser(authUser);
+          } else {
+            // Session kaybolmuş — temizle
+            setUser(null);
+            setProfile(null);
+            setUserRole(null);
+          }
+        } catch (err) {
+          console.warn('[Auth] Visibility change session check failed:', err);
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       mountedRef.current = false;
       subscription.unsubscribe();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [fetchProfile]);
+  }, [fetchProfile, updateSessionState]);
 
   const signInWithPhone = useCallback(async (phone: string, password: string) => {
     setError(null);

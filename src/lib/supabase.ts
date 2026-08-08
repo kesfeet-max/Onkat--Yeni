@@ -9,21 +9,46 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 /**
  * Enterprise Supabase Client
- * - Connection pooling optimizasyonu (realtime kanal limiti)
- * - Otomatik token yenileme
- * - Oturum kalıcılığı
- * - Global fetch timeout ile bağlantı kopması önleme
+ * - Oturum kalıcılığı: localStorage üzerinde persistSession: true
+ * - Otomatik token yenileme: autoRefreshToken: true
+ * - storageKey: Oturum verisi için sabit anahtar (PWA kapanıp açılsa bile korunur)
+ * - flowType: implicit (email/phone+password auth için en uygun)
+ * - detectSessionInUrl: true (password reset gibi akışlarda URL'den token okunabilsin)
  */
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     autoRefreshToken: true,
     persistSession: true,
-    detectSessionInUrl: false,
-    flowType: 'pkce',
+    detectSessionInUrl: true,
+    flowType: 'implicit',
+    storageKey: 'onkati-auth-session',
+    storage: {
+      getItem: (key) => {
+        try {
+          return localStorage.getItem(key);
+        } catch {
+          return null;
+        }
+      },
+      setItem: (key, value) => {
+        try {
+          localStorage.setItem(key, value);
+        } catch {
+          // localStorage dolu veya erişilemez — sessizce devam
+        }
+      },
+      removeItem: (key) => {
+        try {
+          localStorage.removeItem(key);
+        } catch {
+          // Sessizce devam
+        }
+      },
+    },
   },
   realtime: {
     params: {
-      eventsPerSecond: 10, // Rate limiting — sunucu yükünü azalt
+      eventsPerSecond: 10,
     },
   },
   global: {
@@ -31,7 +56,6 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       'x-client-info': 'onkati-enterprise/2.0',
     },
     fetch: (url, options = {}) => {
-      // Global timeout: 15 saniye — bağlantı takılmalarını önle
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 15000);
 
