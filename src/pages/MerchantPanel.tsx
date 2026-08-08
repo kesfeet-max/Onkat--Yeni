@@ -48,6 +48,7 @@ import { formatCurrency, formatDate } from '../lib/utils';
 import { QREngine, CameraFacing, getSavedCameraPreference } from '../lib/qr-engine';
 import { withRetry, resilientRpc, resilientQuery } from '../lib/retry';
 import { toast } from '../lib/toast';
+import { triggerCampaignNotification } from '../lib/push-notifications';
 
 type MerchantTab = 'islem' | 'musteriler' | 'gecmis' | 'profilim';
 type ProfileSubTab = 'bilgilerim' | 'kampanyalar' | 'kasiyerler' | 'guvenlik' | 'ayarlar';
@@ -736,13 +737,20 @@ export function MerchantPanel() {
           }
         }
 
-        // Sunucu tarafı push tetikleme (hedef müşterilere)
+        // Sunucu tarafı gerçek Web Push gönderimi (Edge Function ile VAPID)
         try {
-          await supabase.rpc('kampanya_push_tetikle', {
-            p_campaign_id: r.campaign_id,
-          });
-        } catch {
-          // Sessizce devam
+          const pushResult = await triggerCampaignNotification(
+            campaignForm.title,
+            r.campaign_id,
+            merchantProfile?.store_name || 'Mağaza'
+          );
+          if (pushResult && pushResult.sent > 0) {
+            toast.success(`${pushResult.sent} müşteriye push bildirim gönderildi`);
+          } else if (pushResult && pushResult.total === 0) {
+            console.log('[Push] Aktif push aboneliği bulunamadı');
+          }
+        } catch (pushErr) {
+          console.warn('[Push] Sunucu push hatası:', pushErr);
         }
       } else {
         const errMsg = r?.error || error?.message || 'Kampanya oluşturulamadı';

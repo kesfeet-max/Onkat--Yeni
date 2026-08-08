@@ -284,15 +284,40 @@ export function CustomerPanel() {
         // Service Worker hazır olana kadar bekle
         const registration = await navigator.serviceWorker.ready;
 
-        // Push subscription oluşturmayı dene
+        // Mevcut subscription varsa al, yoksa VAPID key ile yeni oluştur
         let subscription = await registration.pushManager.getSubscription();
 
-        // Subscription'ı sunucuya kaydet
+        if (!subscription) {
+          // VAPID Public Key ile yeni push subscription oluştur
+          const VAPID_PUBLIC_KEY = 'BIxuUF2hX4othdNdGzQ1tq5UMUuaIDE7lIiLUtELBqkR0qVipkEPlL8YM442ilG-TsSgCwJeCTvvFoFUauMHApE';
+          const urlBase64ToUint8Array = (base64String: string): Uint8Array => {
+            const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+            const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+            const rawData = window.atob(base64);
+            const outputArray = new Uint8Array(rawData.length);
+            for (let i = 0; i < rawData.length; ++i) {
+              outputArray[i] = rawData.charCodeAt(i);
+            }
+            return outputArray;
+          };
+
+          subscription = await registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+          });
+        }
+
+        // Subscription'ı sunucuya kaydet (gerçek push için endpoint gerekli)
         if (subscription) {
-          await supabase.rpc('push_abonelik_kaydet', {
+          const { error: subError } = await supabase.rpc('push_abonelik_kaydet', {
             p_subscription: JSON.stringify(subscription.toJSON()),
             p_endpoint: subscription.endpoint,
           });
+          if (subError) {
+            console.warn('[Push] Abonelik kayıt hatası:', subError);
+          } else {
+            console.log('[Push] Abonelik başarıyla kaydedildi:', subscription.endpoint);
+          }
         }
 
         toast.success('Bildirimler açıldı! Artık kampanya bildirimleri alacaksınız.');

@@ -1,9 +1,9 @@
 import { supabase } from './supabase';
 
-// VAPID Public Key - Web Push için gerekli
-// Not: Gerçek üretimde bu key sunucu tarafında oluşturulur
-// Demo/PWA local push için kullanılmaz, ancak yapı hazır
-const VAPID_PUBLIC_KEY = '';
+// VAPID Public Key - Web Push sunucu push için gerekli
+// Bu key ile tarayıcı PushManager.subscribe() yaparak endpoint oluşturur
+// Sunucu tarafındaki Edge Function aynı key pair'in private kısmıyla imzalar
+const VAPID_PUBLIC_KEY = 'BIxuUF2hX4othdNdGzQ1tq5UMUuaIDE7lIiLUtELBqkR0qVipkEPlL8YM442ilG-TsSgCwJeCTvvFoFUauMHApE';
 
 /**
  * Tarayıcı bildirim desteğini kontrol et
@@ -117,8 +117,9 @@ export async function sendLocalNotification(title: string, options: {
 /**
  * Tüm aktif müşterilere kampanya bildirimi gönder
  * (Esnaf panelinden kampanya oluşturulduğunda çağrılır)
+ * Gerçek Web Push: Supabase Edge Function üzerinden VAPID imzalı HTTP push
  */
-export async function triggerCampaignNotification(campaignTitle: string, campaignId: string, storeName: string): Promise<boolean> {
+export async function triggerCampaignNotification(campaignTitle: string, campaignId: string, storeName: string): Promise<{ sent: number; failed: number; total: number } | null> {
   try {
     // Önce local push bildirim gönder (kendi cihazımızda test için)
     await sendLocalNotification(`🎉 ${storeName} - Yeni Kampanya!`, {
@@ -128,14 +129,37 @@ export async function triggerCampaignNotification(campaignTitle: string, campaig
       campaign_id: campaignId,
     });
 
-    // Sunucu tarafı push tetikleme (Supabase Edge Function ile)
-    const { data, error } = await supabase.rpc('kampanya_push_tetikle', {
-      p_campaign_id: campaignId,
+    // Sunucu tarafı gerçek Web Push gönderimi (Edge Function)
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) return null;
+
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+
+    const response = await fetch(`${supabaseUrl}/functions/v1/push-send`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({
+        campaign_id: campaignId,
+        title: `🎉 ${storeName} - Yeni Kampanya!`,
+        message: campaignTitle,
+      }),
     });
 
-    return !error;
-  } catch {
-    return false;
+    if (response.ok) {
+      const result = await response.json();
+      console.log('[Push] Sunucu push sonucu:', result);
+      return { sent: result.sent || 0, failed: result.failed || 0, total: result.total || 0 };
+    } else {
+      const err = await response.text();
+      console.warn('[Push] Edge Function hatası:', response.status, err);
+      return null;
+    }
+  } catch (error) {
+    console.warn('[Push] Kampanya push tetikleme hatası:', error);
+    return null;
   }
 }
 
