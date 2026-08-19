@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { BrandLogo } from '../components/BrandLogo';
 import {
-  Handshake,
   QrCode,
   X,
   Copy,
@@ -97,10 +97,12 @@ export function QRTestPage() {
     <div className="min-h-screen bg-gray-50">
       <header className="bg-primary-600 text-white shadow-lg">
         <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-2">
-            <Handshake className="w-8 h-8 text-secondary-400" />
-            <span className="text-xl font-heading font-bold">Onkatı - QR Test</span>
-          </Link>
+          <div className="flex items-center gap-3 min-w-0">
+            <BrandLogo to="/" size="lg" />
+            <span className="hidden sm:inline text-[11px] font-heading font-bold text-secondary-300 uppercase tracking-[0.2em]">
+              QR Test
+            </span>
+          </div>
           <button
             onClick={() => navigate('/')}
             className="p-2 text-primary-100 hover:text-white transition-colors"

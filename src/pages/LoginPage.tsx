@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Handshake, Phone, Lock, AlertCircle, Mail, X, CheckCircle } from 'lucide-react';
+import { Phone, Lock, AlertCircle, Mail, X, CheckCircle } from 'lucide-react';
+import { BrandLogo } from '../components/BrandLogo';
 import { useAuth } from '../auth/AuthContext';
 import { supabase } from '../lib/supabase';
 
@@ -77,10 +78,9 @@ export function LoginPage() {
       <div className="w-full max-w-md">
         <div className="bg-white rounded-3xl shadow-2xl p-8">
           <div className="text-center mb-8">
-            <Link to="/" className="flex items-center justify-center gap-2 mb-4">
-              <Handshake className="w-10 h-10 text-primary-600" />
-              <span className="text-2xl font-heading font-bold text-gray-900">Onkatı</span>
-            </Link>
+            <div className="flex justify-center mb-4">
+              <BrandLogo to="/" size="lg" />
+            </div>
             <h1 className="text-2xl font-heading font-bold text-gray-900">Giriş Yap</h1>
             <p className="text-gray-500 mt-2">Hesabına eriş</p>
           </div>

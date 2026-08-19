@@ -156,6 +156,114 @@ Deno.serve(async (req: Request) => {
           status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
+
+      // Esnafin gercek giris (auth) e-postasini getir
+      if (postAction === 'get_merchant_credentials') {
+        const { user_id } = body;
+        if (!user_id) {
+          return new Response(JSON.stringify({ error: 'user_id gerekli' }), {
+            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        const { data, error } = await supabase.auth.admin.getUserById(user_id);
+        if (error || !data?.user) {
+          return new Response(JSON.stringify({ error: 'Kullanici bulunamadi' }), {
+            status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        return new Response(JSON.stringify({
+          success: true,
+          email: data.user.email || '',
+          phone: data.user.phone || '',
+          email_confirmed: !!data.user.email_confirmed_at,
+          last_sign_in_at: data.user.last_sign_in_at || null,
+        }), {
+          status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // Esnafin giris e-postasini ve/veya sifresini guncelle (service_role ile hashlenir)
+      if (postAction === 'update_merchant_credentials') {
+        const { merchant_id, user_id, email, password } = body;
+
+        if (!user_id) {
+          return new Response(JSON.stringify({ error: 'user_id gerekli' }), {
+            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        const newEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+        const newPassword = typeof password === 'string' ? password.trim() : '';
+
+        if (!newEmail && !newPassword) {
+          return new Response(JSON.stringify({ error: 'Guncellenecek bilgi girilmedi' }), {
+            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        const updatePayload: Record<string, unknown> = {};
+
+        if (newEmail) {
+          const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+          if (!emailPattern.test(newEmail)) {
+            return new Response(JSON.stringify({ error: 'Gecersiz e-posta adresi' }), {
+              status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+          updatePayload.email = newEmail;
+          updatePayload.email_confirm = true;
+        }
+
+        if (newPassword) {
+          if (newPassword.length < 6) {
+            return new Response(JSON.stringify({ error: 'Sifre en az 6 karakter olmalidir' }), {
+              status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+          updatePayload.password = newPassword;
+        }
+
+        const { error: authUpdateError } = await supabase.auth.admin.updateUserById(user_id, updatePayload);
+        if (authUpdateError) {
+          const rawMsg = authUpdateError.message || '';
+          const friendly = rawMsg.toLowerCase().includes('already')
+            ? 'Bu e-posta adresi baska bir kullanici tarafindan kullaniliyor'
+            : 'Giris bilgileri guncellenemedi: ' + rawMsg;
+          return new Response(JSON.stringify({ error: friendly }), {
+            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        // Uygulama tablolarindaki e-posta kaydini da senkronize et
+        if (newEmail) {
+          if (merchant_id) {
+            await supabase.from('merchants')
+              .update({ email: newEmail, updated_at: new Date().toISOString() })
+              .eq('id', merchant_id);
+          }
+          await supabase.from('profiles').update({ email: newEmail }).eq('user_id', user_id);
+        }
+
+        // Islem kaydi (tablo yoksa sessizce gecilir)
+        await supabase.from('admin_action_logs').insert({
+          admin_id: admin?.id ?? null,
+          admin_email: admin?.email ?? null,
+          target_user_id: user_id,
+          action: newPassword && newEmail ? 'merchant_email_password_update'
+            : newPassword ? 'merchant_password_reset' : 'merchant_email_update',
+          created_at: new Date().toISOString(),
+        });
+
+        return new Response(JSON.stringify({
+          success: true,
+          email_updated: !!newEmail,
+          password_updated: !!newPassword,
+        }), {
+          status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
     }
 
     return new Response(JSON.stringify({ error: 'Gecersiz istek' }), {

@@ -25,6 +25,7 @@ import {
   Megaphone,
   CalendarDays,
 } from 'lucide-react';
+import { BrandLogo } from '../components/BrandLogo';
 import { useAuth } from '../auth/AuthContext';
 import { supabase } from '../lib/supabase';
 import { toast } from '../lib/toast';
@@ -1038,38 +1039,45 @@ export function CustomerPanel() {
         </div>
       )}
 
-      {/* Header */}
-      <header className="bg-gradient-to-r from-emerald-700 via-emerald-600 to-teal-600 text-white px-5 py-5 shadow-xl">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-emerald-200 text-xs font-medium uppercase tracking-wider">Onkatı Sadakat</p>
-            <h1 className="text-xl font-bold mt-0.5">Hoş geldiniz, {customer.full_name || 'Müşteri'}</h1>
+      {/* Header — ince, zarif başlık alanı (sadece banner) */}
+      <header className="bg-gradient-to-r from-emerald-700 via-emerald-600 to-teal-600 text-white px-5 pt-5 pb-14 shadow-lg">
+        <div className="flex items-center justify-between max-w-lg mx-auto">
+          <div className="min-w-0 flex items-center gap-3">
+            <BrandLogo to="/" size="sm" />
+            <h1 className="text-sm sm:text-base font-bold truncate">
+              Hoş geldiniz, {customer.full_name || 'Müşteri'}
+            </h1>
           </div>
-          <div className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center">
+          <div className="w-10 h-10 shrink-0 bg-white/15 rounded-xl flex items-center justify-center border border-white/20">
             <Wallet className="w-5 h-5" />
           </div>
         </div>
+      </header>
 
-        {/* Cüzdan Kartı */}
-        <div className="mt-4 bg-white/10 backdrop-blur-sm rounded-2xl p-4 border border-white/20">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-emerald-100 text-xs">Toplam Bakiye</p>
-              <p className="text-3xl font-black mt-1">{totalBalance.toFixed(2)} <span className="text-lg font-medium">Puan</span></p>
-              <p className="text-emerald-200 text-xs mt-1">≈ {totalBalance.toFixed(2)} TL değerinde</p>
+      {/* Yüzer Bakiye Kartı — yeşil banner'ın üzerine taşar */}
+      <div className="px-4 -mt-10 max-w-lg mx-auto relative z-10">
+        <div className="bg-white rounded-3xl p-5 border border-emerald-50 shadow-[0_12px_32px_-8px_rgba(6,78,59,0.28)]">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-gray-400 text-[11px] font-semibold uppercase tracking-wide">Toplam Bakiye</p>
+              <p className="text-[34px] leading-none font-black text-gray-800 mt-1.5">
+                {totalBalance.toFixed(2)}
+                <span className="text-lg font-semibold text-gray-500 ml-1.5">Puan</span>
+              </p>
+              <p className="text-emerald-600 text-xs font-semibold mt-2">≈ {totalBalance.toFixed(2)} TL değerinde</p>
             </div>
-            <div className="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center">
-              <Wallet className="w-7 h-7" />
+            <div className="w-14 h-14 shrink-0 bg-gradient-to-br from-emerald-500 to-teal-500 rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-200/70">
+              <Wallet className="w-7 h-7 text-white" />
             </div>
           </div>
-          <div className="flex gap-4 mt-3 pt-3 border-t border-white/10">
+          <div className="flex gap-5 mt-4 pt-3.5 border-t border-gray-100">
             <div className="flex items-center gap-1.5">
-              <ArrowDownRight className="w-3.5 h-3.5 text-emerald-300" />
-              <span className="text-xs text-emerald-100">Kazanılan: <strong>{totalEarned.toFixed(0)}</strong></span>
+              <ArrowDownRight className="w-3.5 h-3.5 text-emerald-500" />
+              <span className="text-xs text-gray-500">Kazanılan: <strong className="text-emerald-600">{totalEarned.toFixed(0)}</strong></span>
             </div>
             <div className="flex items-center gap-1.5">
-              <ArrowUpRight className="w-3.5 h-3.5 text-orange-300" />
-              <span className="text-xs text-emerald-100">Harcanan: <strong>{totalSpent.toFixed(0)}</strong></span>
+              <ArrowUpRight className="w-3.5 h-3.5 text-orange-500" />
+              <span className="text-xs text-gray-500">Harcanan: <strong className="text-orange-600">{totalSpent.toFixed(0)}</strong></span>
             </div>
           </div>
         </div>
@@ -1083,14 +1091,14 @@ export function CustomerPanel() {
                   setSelectedAssignment(cashierAssignments[0]);
                   setCashierMode(true);
                 }}
-                className="w-full py-3 bg-white/15 backdrop-blur-sm border border-white/30 rounded-xl text-white font-semibold text-sm hover:bg-white/25 transition flex items-center justify-center gap-2"
+                className="w-full py-3 bg-white border border-indigo-100 rounded-2xl text-indigo-700 font-semibold text-sm hover:bg-indigo-50 transition flex items-center justify-center gap-2 shadow-[0_10px_24px_-10px_rgba(49,46,129,0.35)]"
               >
                 <Building2 className="w-4 h-4" />
                 🏢 Kasiyer İşlemleri — {cashierAssignments[0].store_name}
               </button>
             ) : (
               <div className="space-y-2">
-                <p className="text-emerald-200 text-xs font-medium">Kasiyer Yetkileri:</p>
+                <p className="text-gray-500 text-xs font-semibold px-1">Kasiyer Yetkileri:</p>
                 {cashierAssignments.map((a) => (
                   <button
                     key={a.cashier_id}
@@ -1098,7 +1106,7 @@ export function CustomerPanel() {
                       setSelectedAssignment(a);
                       setCashierMode(true);
                     }}
-                    className="w-full py-2.5 bg-white/15 backdrop-blur-sm border border-white/30 rounded-xl text-white font-semibold text-sm hover:bg-white/25 transition flex items-center justify-center gap-2"
+                    className="w-full py-2.5 bg-white border border-indigo-100 rounded-2xl text-indigo-700 font-semibold text-sm hover:bg-indigo-50 transition flex items-center justify-center gap-2 shadow-[0_10px_24px_-10px_rgba(49,46,129,0.35)]"
                   >
                     <Building2 className="w-4 h-4" />
                     🏢 {a.store_name}
@@ -1108,7 +1116,7 @@ export function CustomerPanel() {
             )}
           </div>
         )}
-      </header>
+      </div>
 
 
 

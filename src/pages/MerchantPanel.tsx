@@ -41,6 +41,7 @@ import {
   Target,
   Pause,
   Play,
+  BadgeDollarSign,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -49,8 +50,9 @@ import { QREngine, CameraFacing, getSavedCameraPreference } from '../lib/qr-engi
 import { withRetry, resilientRpc, resilientQuery } from '../lib/retry';
 import { toast } from '../lib/toast';
 import { triggerCampaignNotification } from '../lib/push-notifications';
+import { SubscriptionTab } from '../components/SubscriptionTab';
 
-type MerchantTab = 'islem' | 'musteriler' | 'gecmis' | 'profilim';
+type MerchantTab = 'islem' | 'musteriler' | 'gecmis' | 'abonelik' | 'profilim';
 type ProfileSubTab = 'bilgilerim' | 'kampanyalar' | 'kasiyerler' | 'guvenlik' | 'ayarlar';
 
 interface CustomerInfo {
@@ -921,6 +923,12 @@ export function MerchantPanel() {
     try {
       // Aktif kasiyer varsa bilgisini ekle
       const activeCashier = cashiers.find((c: any) => c.is_active && c.user_id === user?.id);
+      if (profile?.is_active === false) {
+        setProcessing(false);
+        setMessage({ type: 'error', text: 'Hesabınızın kullanım süresi dolmuştur, lütfen ödeme yapınız' });
+        setActiveTab('abonelik');
+        return;
+      }
       const { data: result, error } = await resilientRpc(supabase, 'islem_puan_yukle', {
         p_customer_id: customerInfo.customer_id,
         p_amount: numAmount,
@@ -982,6 +990,12 @@ export function MerchantPanel() {
     try {
       // Aktif kasiyer varsa bilgisini ekle
       const activeCashier = cashiers.find((c: any) => c.is_active && c.user_id === user?.id);
+      if (profile?.is_active === false) {
+        setProcessing(false);
+        setMessage({ type: 'error', text: 'Hesabınızın kullanım süresi dolmuştur, lütfen ödeme yapınız' });
+        setActiveTab('abonelik');
+        return;
+      }
       const { data: result, error } = await resilientRpc(supabase, 'islem_puan_harca', {
         p_customer_id: customerInfo.customer_id,
         p_points_to_spend: numPoints,
@@ -1058,31 +1072,36 @@ export function MerchantPanel() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-emerald-50 via-white to-gray-50">
-      {/* Header */}
-      <header className="bg-gradient-to-r from-emerald-700 via-emerald-600 to-teal-600 text-white px-5 py-5 shadow-xl">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-emerald-200 text-xs font-medium uppercase tracking-wider">Onkatı Esnaf</p>
-            <h1 className="text-xl font-bold mt-0.5">{merchant?.store_name || 'Esnaf Paneli'}</h1>
+      {/* Header — müşteri paneli ile birebir aynı ince başlık alanı */}
+      <header className="bg-gradient-to-r from-emerald-700 via-emerald-600 to-teal-600 text-white px-5 pt-5 pb-14 shadow-lg">
+        <div className="flex items-center justify-between max-w-lg mx-auto">
+          <div className="min-w-0 flex items-center gap-3">
+            <BrandLogo to="/" size="sm" />
+            <h1 className="text-sm sm:text-base font-bold truncate">{merchant?.store_name || 'Esnaf Paneli'}</h1>
           </div>
-        </div>
-
-        {/* Günlük Özet */}
-        <div className="mt-4 grid grid-cols-3 gap-2">
-          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-3 text-center border border-white/10">
-            <p className="text-2xl font-bold">{myCustomers.length}</p>
-            <p className="text-emerald-200 text-xs">Müşteri</p>
-          </div>
-          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-3 text-center border border-white/10">
-            <p className="text-2xl font-bold text-emerald-200">+{todayEarnPoints.toFixed(0)}</p>
-            <p className="text-emerald-200 text-xs">Bugün Yüklenen</p>
-          </div>
-          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-3 text-center border border-white/10">
-            <p className="text-2xl font-bold text-orange-200">{todaySpendPoints.toFixed(0)}</p>
-            <p className="text-emerald-200 text-xs">Bugün Harcanan</p>
+          <div className="w-10 h-10 shrink-0 bg-white/15 rounded-xl flex items-center justify-center border border-white/20">
+            <Wallet className="w-5 h-5" />
           </div>
         </div>
       </header>
+
+      {/* Yüzer Özet Kartları — yeşil banner'ın üzerine taşar */}
+      <div className="px-4 -mt-10 max-w-lg mx-auto relative z-10">
+        <div className="grid grid-cols-3 gap-2.5">
+          <div className="bg-white rounded-2xl p-3.5 text-center border border-emerald-50 shadow-[0_12px_32px_-8px_rgba(6,78,59,0.28)]">
+            <p className="text-2xl font-black text-gray-800">{myCustomers.length}</p>
+            <p className="text-[11px] text-gray-500 font-medium mt-0.5">Müşteri</p>
+          </div>
+          <div className="bg-white rounded-2xl p-3.5 text-center border border-emerald-50 shadow-[0_12px_32px_-8px_rgba(6,78,59,0.28)]">
+            <p className="text-2xl font-black text-emerald-600">+{todayEarnPoints.toFixed(0)}</p>
+            <p className="text-[11px] text-gray-500 font-medium mt-0.5">Bugün Yüklenen</p>
+          </div>
+          <div className="bg-white rounded-2xl p-3.5 text-center border border-emerald-50 shadow-[0_12px_32px_-8px_rgba(6,78,59,0.28)]">
+            <p className="text-2xl font-black text-orange-500">{todaySpendPoints.toFixed(0)}</p>
+            <p className="text-[11px] text-gray-500 font-medium mt-0.5">Bugün Harcanan</p>
+          </div>
+        </div>
+      </div>
 
       {/* Message */}
       {message && (
@@ -1105,8 +1124,28 @@ export function MerchantPanel() {
 
       {/* Content */}
       <main className="p-4 pb-24 max-w-lg mx-auto">
-        {/* İşlem Tab */}
-        {activeTab === 'islem' && (
+        {/* İşlem Tab — Pasif hesap engeli (abonelik süresi dolmuş) */}
+        {activeTab === 'islem' && profile?.is_active === false && (
+          <div className="bg-white rounded-2xl shadow-lg p-6 text-center border-2 border-red-200">
+            <div className="w-16 h-16 bg-red-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+              <AlertCircle className="w-8 h-8 text-red-600" />
+            </div>
+            <h2 className="text-lg font-bold text-red-700 mb-2">İşlem Yapılamıyor</h2>
+            <p className="text-sm text-gray-600 mb-5">
+              Hesabınızın kullanım süresi dolmuştur, lütfen ödeme yapınız. Ödemeniz onaylanana kadar müşteri QR kodu
+              okutamaz ve puan işlemi yapamazsınız.
+            </p>
+            <button
+              onClick={() => setActiveTab('abonelik')}
+              className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 text-white py-3.5 rounded-xl font-bold hover:from-emerald-700 hover:to-teal-700 transition shadow-lg shadow-emerald-200 flex items-center justify-center gap-2"
+            >
+              <BadgeDollarSign className="w-5 h-5" />
+              Abonelik & Ödeme Sayfasına Git
+            </button>
+          </div>
+        )}
+
+        {activeTab === 'islem' && profile?.is_active !== false && (
           <div className="space-y-4">
             {!customerInfo ? (
               <>
@@ -1689,7 +1728,17 @@ export function MerchantPanel() {
           );
         })()}
 
-        {/* Profilim Tab */}
+        {/* Abonelik & Ödeme Tab (yalnızca Havale/EFT) */}
+        {activeTab === 'abonelik' && (
+          <SubscriptionTab
+            storeCode={`ONK-${String(profile?.store_id ?? 0).padStart(4, '0')}`}
+            storeName={profile?.store_name || 'İşletmem'}
+            fullName={profile?.full_name || 'Esnaf'}
+            createdAt={profile?.created_at || ''}
+            isActive={profile?.is_active !== false}
+          />
+        )}
+
         {activeTab === 'profilim' && (
           <div className="space-y-4">
             {/* Profil Alt Sekme Navigasyonu */}
@@ -2427,6 +2476,20 @@ export function MerchantPanel() {
           >
             <History className="w-5 h-5" />
             <span className="text-[10px] font-semibold">Geçmiş</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('abonelik')}
+            className={`flex-1 py-3 flex flex-col items-center gap-0.5 transition relative ${
+              activeTab === 'abonelik'
+                ? 'text-emerald-700'
+                : 'text-gray-400'
+            }`}
+          >
+            {!profile?.is_active && (
+              <span className="absolute top-1.5 right-1/4 w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+            )}
+            <BadgeDollarSign className="w-5 h-5" />
+            <span className="text-[10px] font-semibold">Abonelik</span>
           </button>
           <button
             onClick={() => setActiveTab('profilim')}

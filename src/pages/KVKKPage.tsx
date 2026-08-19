@@ -1,15 +1,14 @@
-import { Link } from 'react-router-dom';
-import { Handshake, Shield } from 'lucide-react';
+import { Shield } from 'lucide-react';
+import { BrandLogo } from '../components/BrandLogo';
 
 export function KVKKPage() {
   return (
     <div className="min-h-screen bg-gray-50 py-12 px-4">
       <div className="max-w-3xl mx-auto">
         <div className="text-center mb-8">
-          <Link to="/" className="inline-flex items-center gap-2 mb-6">
-            <Handshake className="w-8 h-8 text-primary-600" />
-            <span className="text-xl font-heading font-bold text-gray-900">Onkatı</span>
-          </Link>
+          <div className="flex justify-center mb-6">
+            <BrandLogo to="/" size="lg" />
+          </div>
         </div>
 
         <div className="bg-white rounded-2xl shadow-lg p-8 md:p-12">

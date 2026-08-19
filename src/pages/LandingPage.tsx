@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { PwaInstallBanner } from '../components/PwaInstallBanner';
+import { BrandLogo } from '../components/BrandLogo';
 import {
-  Handshake,
   TrendingUp,
   Shield,
   Users,
@@ -36,10 +36,7 @@ function Navbar() {
     <nav className="bg-primary-600 shadow-lg sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
-          <Link to="/" className="flex items-center gap-2">
-            <Handshake className="w-8 h-8 text-secondary-400" />
-            <span className="text-2xl font-heading font-bold text-white">Onkatı</span>
-          </Link>
+          <BrandLogo to="/" size="lg" />
           <div className="flex items-center gap-4">
             <Link
               to="/giris"
