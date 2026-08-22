@@ -1,5 +1,5 @@
 /**
- * Onkatı PWA Service Worker v4
+ * Onkatı PWA Service Worker v5
  * 
  * ÖNEMLİ: Bu SW arka planda (PWA kapalıyken) push bildirimi almak için tasarlanmıştır.
  * - skipWaiting() + clients.claim() ile eski SW anında değiştirilir
@@ -8,10 +8,14 @@
  * - actions KULLANILMIYOR — bazı tarayıcılarda "URL kopyala" tetikler
  */
 
-const CACHE_VERSION = 'onkati-v4';
+const CACHE_VERSION = 'onkati-v5';
+
+/** Yeni altın ON logosu — şeffaf zeminli PNG (PWA ikonu ve bildirim ikonu) */
+const APP_ICON = '/assets/onkati-icon-gold.png?v=2';
+
 const STATIC_ASSETS = [
   '/',
-  '/favicon.svg',
+  APP_ICON,
   '/manifest.json'
 ];
 
@@ -100,8 +104,8 @@ self.addEventListener('push', (event) => {
   // Bu, tarayıcının "URL kopyala" fallback davranışını engeller
   const options = {
     body: data.body || data.message || 'Yeni bir kampanya bildiriminiz var!',
-    icon: data.icon || '/favicon.svg',
-    badge: '/favicon.svg',
+    icon: data.icon || APP_ICON,
+    badge: APP_ICON,
     vibrate: [300, 100, 300, 100, 300],
     silent: false,
     requireInteraction: true,

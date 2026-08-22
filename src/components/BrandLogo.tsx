@@ -1,31 +1,35 @@
 import { Link } from 'react-router-dom';
 
-/** Yeni lüks altın tonlu Onkatı logosu (koyu yeşil zeminli, marka metni dahil) */
-const LOGO_SRC = '/assets/onkati-logo-gold.png';
+/**
+ * Onkatı kurumsal logosu: saydam arka planlı, 3B altın "ON" ay-yıldız amblemi +
+ * "Onkatı / ESNAF SADAKAT SİSTEMİ" marka metni.
+ */
+const LOGO_SRC =
+  'https://mgx-backend-cdn.metadl.com/generate/images/1358219/2026-08-22/u7awbyaaakfa/onkati-wordmark-gold-transparent.png';
 
 type LogoSize = 'sm' | 'md' | 'lg';
 
 /**
- * Responsive yükseklikler:
- * - mobil: 32px - 36px
- * - masaüstü: 40px - 48px
+ * Responsive yükseklikler (yatay logo olduğu için genişlik otomatik):
+ * - mobil: 36px - 44px
+ * - masaüstü: 44px - 56px
  */
 const SIZE_CLASSES: Record<LogoSize, string> = {
-  sm: 'h-8 md:h-10',
-  md: 'h-9 md:h-11',
-  lg: 'h-9 md:h-12',
+  sm: 'h-9 md:h-11',
+  md: 'h-10 md:h-12',
+  lg: 'h-11 md:h-14',
 };
 
 interface BrandLogoProps {
   /** Tıklanınca gidilecek adres. `null` verilirse link sarmalayıcı kullanılmaz. */
   to?: string | null;
   size?: LogoSize;
-  /** Logonun kendi koyu yeşil zeminini kart gibi göstermek için çerçeve ekler. */
+  /** Saydam logoyu kart gibi göstermek için hafif çerçeve ekler (varsayılan: kapalı). */
   framed?: boolean;
   className?: string;
 }
 
-export function BrandLogo({ to = '/', size = 'md', framed = true, className = '' }: BrandLogoProps) {
+export function BrandLogo({ to = '/', size = 'md', framed = false, className = '' }: BrandLogoProps) {
   const image = (
     <img
       src={LOGO_SRC}
@@ -33,7 +37,7 @@ export function BrandLogo({ to = '/', size = 'md', framed = true, className = ''
       className={[
         SIZE_CLASSES[size],
         'w-auto object-contain select-none',
-        framed ? 'rounded-lg ring-1 ring-white/10 shadow-sm' : '',
+        framed ? 'rounded-lg ring-1 ring-white/10 px-2 py-1' : '',
         className,
       ]
         .filter(Boolean)
