@@ -84,6 +84,11 @@ GRANT EXECUTE ON FUNCTION is_current_user_admin() TO authenticated, service_role
 
 -- 6) Admin havale/EFT onayı: aboneliği uzatır ve hesabı aktif eder.
 --    Süre uzatma tamamen manuel bir admin işlemidir.
+--    ÖNEMLİ: Eski sürüm boolean döndürüyordu. PostgreSQL'de CREATE OR REPLACE ile
+--    dönüş tipi değiştirilemez, bu yüzden önce mevcut fonksiyon düşürülür.
+DROP FUNCTION IF EXISTS approve_merchant_payment(integer, integer);
+DROP FUNCTION IF EXISTS approve_merchant_payment(integer);
+
 CREATE OR REPLACE FUNCTION approve_merchant_payment(p_store_id integer, p_months integer DEFAULT 1)
 RETURNS json
 LANGUAGE plpgsql
@@ -130,6 +135,8 @@ $$;
 GRANT EXECUTE ON FUNCTION approve_merchant_payment(integer, integer) TO authenticated, service_role;
 
 -- 7) Admin manuel aktif/pasif işlemi (RLS'e takılmadan çalışması için)
+DROP FUNCTION IF EXISTS admin_esnaf_durum_degistir(uuid, boolean);
+
 CREATE OR REPLACE FUNCTION admin_esnaf_durum_degistir(p_merchant_id uuid, p_active boolean)
 RETURNS json
 LANGUAGE plpgsql
@@ -164,5 +171,24 @@ END;
 $$;
 
 GRANT EXECUTE ON FUNCTION admin_esnaf_durum_degistir(uuid, boolean) TO authenticated, service_role;
+
+-- 8) Yöneticinin esnaf/müşteri kaydını doğrudan güncelleyebilmesi için RLS politikası.
+--    Bu politika olmadan panelden yapılan güncelleme sessizce 0 satır etkiler.
+--    NOT: Tabloların RLS açık/kapalı durumu DEĞİŞTİRİLMEZ. RLS kapalıysa politika
+--    zaten gerekmez; açıksa aşağıdaki permissive politika adminlere tam yetki verir
+--    ve mevcut müşteri/esnaf politikaları olduğu gibi korunur.
+DROP POLICY IF EXISTS "admins_manage_merchants" ON merchants;
+CREATE POLICY "admins_manage_merchants" ON merchants
+FOR ALL
+TO authenticated
+USING (is_current_user_admin())
+WITH CHECK (is_current_user_admin());
+
+DROP POLICY IF EXISTS "admins_manage_customers" ON customers;
+CREATE POLICY "admins_manage_customers" ON customers
+FOR ALL
+TO authenticated
+USING (is_current_user_admin())
+WITH CHECK (is_current_user_admin());
 
 COMMIT;

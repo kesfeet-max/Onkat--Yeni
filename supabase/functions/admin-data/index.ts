@@ -50,6 +50,60 @@ async function verifyAdmin(req: Request, supabase: any): Promise<{ userId: strin
   return { userId: user.id, admin: null, error: 'Admin yetkisi yok' };
 }
 
+/**
+ * Esnaf listesine gercek islem verilerinden hesaplanan ozetleri ekler.
+ *
+ * merchants tablosundaki total_revenue / total_points_distributed / total_customers
+ * kolonlari guvenilir sekilde guncellenmedigi icin bu degerler her istekte
+ * completed transactions uzerinden yeniden hesaplanir.
+ */
+async function attachMerchantStats(supabase: any, merchantList: any[]) {
+  if (!merchantList || merchantList.length === 0) return merchantList || [];
+
+  const { data: txs } = await supabase
+    .from('transactions')
+    .select('merchant_id, customer_id, amount, points, type')
+    .eq('status', 'completed');
+
+  const map = new Map<string, { revenue: number; points: number; spent: number; customers: Set<string> }>();
+
+  for (const t of txs || []) {
+    if (!t.merchant_id) continue;
+    let entry = map.get(t.merchant_id);
+    if (!entry) {
+      entry = { revenue: 0, points: 0, spent: 0, customers: new Set<string>() };
+      map.set(t.merchant_id, entry);
+    }
+    if (t.customer_id) entry.customers.add(t.customer_id);
+    if (t.type === 'earn') {
+      entry.revenue += Number(t.amount) || 0;
+      entry.points += Number(t.points) || 0;
+    } else if (t.type === 'spend') {
+      entry.spent += Number(t.points) || 0;
+    }
+  }
+
+  return merchantList.map((m: any) => {
+    const entry = map.get(m.id);
+    if (!entry) {
+      return {
+        ...m,
+        total_revenue: Number(m.total_revenue) || 0,
+        total_points_distributed: Number(m.total_points_distributed) || 0,
+        total_customers: Number(m.total_customers) || 0,
+        total_points_spent: 0,
+      };
+    }
+    return {
+      ...m,
+      total_revenue: entry.revenue,
+      total_points_distributed: entry.points,
+      total_customers: entry.customers.size,
+      total_points_spent: entry.spent,
+    };
+  });
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
@@ -80,7 +134,7 @@ Deno.serve(async (req: Request) => {
         const { data: transactions } = await supabase.from('transactions').select('id, amount, points, type, status, created_at').eq('status', 'completed').eq('type', 'earn');
 
         const customerList = customers || [];
-        const merchantList = merchants || [];
+        const merchantList = await attachMerchantStats(supabase, merchants || []);
         const txList = transactions || [];
 
         const totalRevenue = txList.reduce((sum: number, t: any) => sum + (t.amount || 0), 0);
@@ -111,7 +165,60 @@ Deno.serve(async (req: Request) => {
 
       if (action === 'merchants') {
         const { data } = await supabase.from('merchants').select('*').order('created_at', { ascending: false });
-        return new Response(JSON.stringify({ success: true, merchants: data || [] }), {
+        const merchantList = await attachMerchantStats(supabase, data || []);
+        return new Response(JSON.stringify({ success: true, merchants: merchantList }), {
+          status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // Tek bir esnafin islem gecmisi + gercek verilerden hesaplanan ozet.
+      // Dogrudan tablo sorgusu RLS nedeniyle bos donebildigi icin burada
+      // service_role ile okunur.
+      if (action === 'merchant_detail') {
+        const merchantId = url.searchParams.get('merchant_id');
+        if (!merchantId) {
+          return new Response(JSON.stringify({ error: 'merchant_id gerekli' }), {
+            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        const { data: txs, error: txError } = await supabase
+          .from('transactions')
+          .select('id, type, amount, points, status, created_at, customer_id, customers(full_name, phone), merchants(store_name, store_id)')
+          .eq('merchant_id', merchantId)
+          .eq('status', 'completed')
+          .order('created_at', { ascending: false })
+          .limit(500);
+
+        if (txError) throw txError;
+
+        const list = txs || [];
+        const uniqueCustomers = new Set<string>();
+        let revenue = 0;
+        let points = 0;
+        let spent = 0;
+
+        for (const t of list) {
+          if (t.customer_id) uniqueCustomers.add(t.customer_id);
+          if (t.type === 'earn') {
+            revenue += Number(t.amount) || 0;
+            points += Number(t.points) || 0;
+          } else if (t.type === 'spend') {
+            spent += Number(t.points) || 0;
+          }
+        }
+
+        return new Response(JSON.stringify({
+          success: true,
+          transactions: list.slice(0, 50),
+          stats: {
+            revenue,
+            points,
+            spent,
+            customers: uniqueCustomers.size,
+            transactionCount: list.length,
+          },
+        }), {
           status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }

@@ -91,6 +91,15 @@ interface TransactionData {
 
 type TabType = 'overview' | 'customers' | 'merchants' | 'transactions' | 'settings';
 
+/** Esnaf detay modalında gösterilen, gerçek işlemlerden hesaplanan özet. */
+interface DetailStats {
+  revenue: number;
+  points: number;
+  spent: number;
+  customers: number;
+  transactionCount: number;
+}
+
 export function AdminPanel() {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [loading, setLoading] = useState(true);
@@ -101,6 +110,7 @@ export function AdminPanel() {
   const [searchTerm, setSearchTerm] = useState('');
   const [merchantFilter, setMerchantFilter] = useState<MerchantFilter>('all');
   const [extendingId, setExtendingId] = useState<string | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
   const [stats, setStats] = useState({
     totalCustomers: 0,
     totalMerchants: 0,
@@ -124,6 +134,7 @@ export function AdminPanel() {
   const [credMessage, setCredMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [detailMerchant, setDetailMerchant] = useState<MerchantData | null>(null);
   const [merchantTransactions, setMerchantTransactions] = useState<TransactionData[]>([]);
+  const [detailStats, setDetailStats] = useState<DetailStats | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const navigate = useNavigate();
 
@@ -209,56 +220,194 @@ export function AdminPanel() {
     }
   };
 
+  /**
+   * Aktif / Pasif durumunu değiştirir.
+   *
+   * Üç yol sırayla denenir ve HER BİRİNİN gerçekten satır güncellediği doğrulanır:
+   *  1) RPC (admin_esnaf_durum_degistir) — SECURITY DEFINER, RLS'i aşar
+   *  2) Edge Function (admin-data / toggle_status) — service_role ile çalışır
+   *  3) Doğrudan tablo güncellemesi — .select() ile etkilenen satır sayısı kontrol edilir
+   *
+   * Hiçbiri satır güncellemezse kullanıcıya sessiz "başarılı" mesajı GÖSTERİLMEZ.
+   */
   const toggleUserStatus = async (table: 'customers' | 'merchants', id: string, currentStatus: boolean) => {
-    try {
-      const nextStatus = !currentStatus;
+    const nextStatus = !currentStatus;
+    const successText =
+      table === 'merchants'
+        ? nextStatus
+          ? 'Esnaf aktif edildi'
+          : 'Esnaf manuel olarak pasife alındı'
+        : nextStatus
+          ? 'Müşteri aktif edildi'
+          : 'Müşteri pasife alındı';
 
-      // Esnaf için önce RPC denenir (RLS'e takılmadan çalışır), olmazsa doğrudan update.
+    /** Yerel listeyi anında günceller, böylece tablo beklemeden yeni durumu gösterir. */
+    const applyLocal = () => {
+      if (table === 'merchants') {
+        setMerchants(prev => prev.map(m => (m.id === id ? { ...m, is_active: nextStatus } : m)));
+      } else {
+        setCustomers(prev => prev.map(c => (c.id === id ? { ...c, is_active: nextStatus } : c)));
+      }
+    };
+
+    setTogglingId(id);
+    setMessage(null);
+
+    try {
+      // 1) RPC yolu (yalnızca esnaf için tanımlı)
       if (table === 'merchants') {
         const { data: rpcData, error: rpcError } = await supabase.rpc('admin_esnaf_durum_degistir', {
           p_merchant_id: id,
           p_active: nextStatus,
         });
 
-        if (!rpcError && rpcData && (rpcData as any).success !== false) {
-          setMessage({
-            type: 'success',
-            text: nextStatus ? 'Esnaf aktif edildi' : 'Esnaf manuel olarak pasife alındı',
-          });
+        if (!rpcError && rpcData && (rpcData as any).success === true) {
+          applyLocal();
+          setMessage({ type: 'success', text: successText });
           fetchData();
           return;
         }
       }
 
-      const { error } = await supabase
+      // 2) Edge Function yolu (service_role, RLS'i aşar)
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        try {
+          const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-data`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              action: 'toggle_status',
+              table,
+              id,
+              current_status: currentStatus,
+            }),
+          });
+          const json = await response.json().catch(() => ({}));
+
+          if (response.ok && json?.success) {
+            applyLocal();
+            setMessage({ type: 'success', text: successText });
+            fetchData();
+            return;
+          }
+        } catch {
+          // Ağ hatası: son yola geçilir
+        }
+      }
+
+      // 3) Doğrudan güncelleme — etkilenen satır sayısı doğrulanır
+      const { data: updatedRows, error } = await supabase
         .from(table)
         .update({ is_active: nextStatus, updated_at: new Date().toISOString() })
-        .eq('id', id);
+        .eq('id', id)
+        .select('id');
 
       if (error) throw error;
 
-      setMessage({ type: 'success', text: 'Durum güncellendi' });
+      if (!updatedRows || updatedRows.length === 0) {
+        setMessage({
+          type: 'error',
+          text:
+            'Durum değiştirilemedi: veritabanı güvenlik kuralları bu güncellemeyi engelliyor. ' +
+            'Supabase SQL Editor üzerinde yönetici yetki betiğini çalıştırmanız gerekiyor.',
+        });
+        return;
+      }
+
+      applyLocal();
+      setMessage({ type: 'success', text: successText });
       fetchData();
-    } catch (err) {
-      setMessage({ type: 'error', text: 'Güncelleme başarısız' });
+    } catch (err: any) {
+      setMessage({
+        type: 'error',
+        text: err?.message
+          ? `Durum güncellenemedi: ${err.message}`
+          : 'Durum güncellenemedi. Lütfen tekrar deneyin.',
+      });
+    } finally {
+      setTogglingId(null);
     }
   };
 
+  /**
+   * Esnaf detay modalını açar.
+   *
+   * Özet değerler (ciro / dağıtılan puan / müşteri sayısı) merchants tablosundaki
+   * sabit kolonlardan DEĞİL, gerçek "completed" işlemlerden hesaplanır.
+   * Önce Edge Function (service_role) denenir; erişilemezse doğrudan sorguya
+   * düşülür ve hesap istemci tarafında yapılır.
+   */
   const openMerchantDetail = async (merchant: MerchantData) => {
     setDetailMerchant(merchant);
     setLoadingDetail(true);
     setMerchantTransactions([]);
+    setDetailStats(null);
+
+    /** İşlem listesinden özet çıkarır. */
+    const computeStats = (list: TransactionData[]): DetailStats => {
+      const uniqueCustomers = new Set<string>();
+      let revenue = 0;
+      let points = 0;
+      let spent = 0;
+
+      list.forEach(t => {
+        const anyTx = t as unknown as { customer_id?: string };
+        if (anyTx.customer_id) uniqueCustomers.add(anyTx.customer_id);
+        if (t.type === 'earn') {
+          revenue += Number(t.amount) || 0;
+          points += Number(t.points) || 0;
+        } else if (t.type === 'spend') {
+          spent += Number(t.points) || 0;
+        }
+      });
+
+      return {
+        revenue,
+        points,
+        spent,
+        customers: uniqueCustomers.size,
+        transactionCount: list.length,
+      };
+    };
+
     try {
+      // 1) Edge Function (RLS'i aşar, en güvenilir yol)
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        try {
+          const response = await fetch(
+            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-data?action=merchant_detail&merchant_id=${merchant.id}`,
+            { headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' } }
+          );
+          const json = await response.json().catch(() => ({}));
+
+          if (response.ok && json?.success) {
+            setMerchantTransactions((json.transactions || []) as TransactionData[]);
+            setDetailStats(json.stats as DetailStats);
+            return;
+          }
+        } catch {
+          // Ağ hatası: doğrudan sorguya geçilir
+        }
+      }
+
+      // 2) Doğrudan sorgu (yedek yol)
       const { data, error } = await supabase
         .from('transactions')
-        .select('id, type, amount, points, status, created_at, customers(full_name, phone), merchants(store_name, store_id)')
+        .select('id, type, amount, points, status, created_at, customer_id, customers(full_name, phone), merchants(store_name, store_id)')
         .eq('merchant_id', merchant.id)
         .eq('status', 'completed')
         .order('created_at', { ascending: false })
-        .limit(50);
+        .limit(500);
 
       if (!error && data) {
-        setMerchantTransactions(data as unknown as TransactionData[]);
+        const list = data as unknown as TransactionData[];
+        setMerchantTransactions(list.slice(0, 50));
+        setDetailStats(computeStats(list));
       }
     } catch (err) {
       console.error('Error fetching merchant transactions:', err);
@@ -1008,16 +1157,23 @@ export function AdminPanel() {
                                 12 Ay
                               </button>
                               <button
-                                onClick={() => toggleUserStatus('merchants', merchant.id, merchant.is_active)}
-                                className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                                  merchant.is_active
+                                onClick={() => toggleUserStatus('merchants', merchant.id, merchant.is_active !== false)}
+                                disabled={togglingId === merchant.id}
+                                className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold transition-colors disabled:opacity-60 ${
+                                  merchant.is_active !== false
                                     ? 'bg-red-50 text-red-600 hover:bg-red-100'
                                     : 'bg-green-50 text-green-700 hover:bg-green-100'
                                 }`}
-                                title={merchant.is_active ? 'Manuel olarak Pasif Yap' : 'Havale onaylandı, Aktif Yap'}
+                                title={merchant.is_active !== false ? 'Manuel olarak Pasif Yap' : 'Havale onaylandı, Aktif Yap'}
                               >
-                                {merchant.is_active ? <X className="w-3.5 h-3.5" /> : <CheckCircle className="w-3.5 h-3.5" />}
-                                {merchant.is_active ? 'Pasif Yap' : 'Aktif Yap'}
+                                {togglingId === merchant.id ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : merchant.is_active !== false ? (
+                                  <X className="w-3.5 h-3.5" />
+                                ) : (
+                                  <CheckCircle className="w-3.5 h-3.5" />
+                                )}
+                                {merchant.is_active !== false ? 'Pasif Yap' : 'Aktif Yap'}
                               </button>
                             </div>
                           </td>
@@ -1155,19 +1311,31 @@ export function AdminPanel() {
               </button>
             </div>
 
-            {/* Özet Kartları */}
-            <div className="grid grid-cols-3 gap-3 p-6 border-b border-gray-100">
+            {/* Özet Kartları — gerçek işlemlerden hesaplanır */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-6 border-b border-gray-100">
               <div className="bg-primary-50 rounded-xl p-3 text-center">
                 <p className="text-xs text-primary-600 font-medium">Toplam Ciro</p>
-                <p className="text-lg font-bold text-primary-700">{formatCurrency(detailMerchant.total_revenue)}</p>
+                <p className="text-lg font-bold text-primary-700">
+                  {loadingDetail ? '…' : formatCurrency(detailStats ? detailStats.revenue : (detailMerchant.total_revenue || 0))}
+                </p>
               </div>
               <div className="bg-green-50 rounded-xl p-3 text-center">
                 <p className="text-xs text-green-600 font-medium">Dağıtılan Puan</p>
-                <p className="text-lg font-bold text-green-700">{detailMerchant.total_points_distributed} TL</p>
+                <p className="text-lg font-bold text-green-700">
+                  {loadingDetail ? '…' : `${detailStats ? detailStats.points : (detailMerchant.total_points_distributed || 0)} TL`}
+                </p>
+              </div>
+              <div className="bg-amber-50 rounded-xl p-3 text-center">
+                <p className="text-xs text-amber-600 font-medium">Harcanan Puan</p>
+                <p className="text-lg font-bold text-amber-700">
+                  {loadingDetail ? '…' : `${detailStats ? detailStats.spent : 0} TL`}
+                </p>
               </div>
               <div className="bg-blue-50 rounded-xl p-3 text-center">
                 <p className="text-xs text-blue-600 font-medium">Müşteri Sayısı</p>
-                <p className="text-lg font-bold text-blue-700">{detailMerchant.total_customers}</p>
+                <p className="text-lg font-bold text-blue-700">
+                  {loadingDetail ? '…' : (detailStats ? detailStats.customers : (detailMerchant.total_customers || 0))}
+                </p>
               </div>
             </div>
 
