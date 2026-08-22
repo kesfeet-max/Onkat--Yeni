@@ -326,8 +326,8 @@ export function CustomerPanel() {
         // Test bildirimi gönder — data.url zorunlu, yoksa tarayıcı "URL kopyala" gösterir
         await registration.showNotification('🔔 Onkatı Bildirimleri Aktif!', {
           body: 'Artık esnaflardan gelen kampanya bildirimlerini anında alacaksınız.',
-          icon: '/assets/onkati-icon-gold.png?v=2',
-          badge: '/assets/onkati-icon-gold.png?v=2',
+          icon: '/assets/onkati-pwa-192.png?v=3',
+          badge: '/assets/onkati-pwa-192.png?v=3',
           vibrate: [200, 100, 200],
           tag: 'push-enabled-test',
           renotify: true,

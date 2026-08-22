@@ -10,14 +10,17 @@ const LOGO_SRC =
 type LogoSize = 'sm' | 'md' | 'lg';
 
 /**
- * Responsive yükseklikler (yatay logo olduğu için genişlik otomatik):
- * - mobil: 36px - 44px
- * - masaüstü: 44px - 56px
+ * Responsive yükseklikler (yatay logo, genişlik otomatik).
+ * Görselin kendi iç boşluğu olduğu için kutu yüksekliği bilinçli olarak yüksek tutulur;
+ * negatif dikey marj ile fazladan boşluk layout'u bozmaz.
+ * - sm (panel üst barı, yanında başlık metni var): mobil 48px / masaüstü 64px
+ * - md: mobil 64px / masaüstü 80px
+ * - lg (giriş, kayıt, ana sayfa, alt bilgi): mobil 80px / masaüstü 112px
  */
 const SIZE_CLASSES: Record<LogoSize, string> = {
-  sm: 'h-9 md:h-11',
-  md: 'h-10 md:h-12',
-  lg: 'h-11 md:h-14',
+  sm: 'h-12 md:h-16 -my-1.5',
+  md: 'h-16 md:h-20 -my-2',
+  lg: 'h-20 md:h-28 -my-3',
 };
 
 interface BrandLogoProps {
@@ -36,8 +39,8 @@ export function BrandLogo({ to = '/', size = 'md', framed = false, className = '
       alt="Onkatı Esnaf Sadakat Sistemi"
       className={[
         SIZE_CLASSES[size],
-        'w-auto object-contain select-none',
-        framed ? 'rounded-lg ring-1 ring-white/10 px-2 py-1' : '',
+        'w-auto max-w-[85vw] object-contain select-none drop-shadow-[0_2px_6px_rgba(0,0,0,0.35)]',
+        framed ? 'rounded-lg ring-1 ring-white/10 px-2' : '',
         className,
       ]
         .filter(Boolean)
