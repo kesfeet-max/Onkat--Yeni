@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { FileText } from 'lucide-react';
 import { BrandLogo } from '../components/BrandLogo';
 

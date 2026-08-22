@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import {
   Copy,
   Check,
@@ -11,20 +11,20 @@ import {
   Sparkles,
   Info,
 } from 'lucide-react';
+import { TRIAL_DAYS, formatTrDate, type MerchantSubscriptionState } from '../lib/subscription';
 
 /** Havale / EFT bilgileri — sistemde BAŞKA hiçbir ödeme yöntemi yoktur. */
 const BANK_NAME = 'İş Bankası';
 const ACCOUNT_HOLDER = 'Mustafa Koçak';
 const IBAN = 'TR02 0006 4000 0014 5030 8033 64';
 const WHATSAPP_NUMBER = '905073376385';
-const TRIAL_DAYS = 30;
 
 interface SubscriptionTabProps {
   storeCode: string;
   storeName: string;
   fullName: string;
-  createdAt: string;
-  isActive: boolean;
+  /** Merkezî hesaplanan abonelik durumu (eksik DB alanlarına karşı güvenli). */
+  subscription: MerchantSubscriptionState;
 }
 
 function CopyRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
@@ -65,25 +65,10 @@ function CopyRow({ label, value, mono }: { label: string; value: string; mono?: 
   );
 }
 
-export function SubscriptionTab({ storeCode, storeName, fullName, createdAt, isActive }: SubscriptionTabProps) {
-  const { trialEndDate, daysLeft, trialOver } = useMemo(() => {
-    const start = createdAt ? new Date(createdAt) : new Date();
-    const end = new Date(start.getTime());
-    end.setDate(end.getDate() + TRIAL_DAYS);
-    const diffMs = end.getTime() - Date.now();
-    const remaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-    return {
-      trialEndDate: end,
-      daysLeft: remaining > 0 ? remaining : 0,
-      trialOver: remaining <= 0,
-    };
-  }, [createdAt]);
-
-  const trialEndText = trialEndDate.toLocaleDateString('tr-TR', {
-    day: '2-digit',
-    month: 'long',
-    year: 'numeric',
-  });
+export function SubscriptionTab({ storeCode, storeName, fullName, subscription }: SubscriptionTabProps) {
+  const isActive = subscription.isActive;
+  const trialEndText = formatTrDate(subscription.trialEndDate);
+  const paidUntilText = subscription.paidUntilDate ? formatTrDate(subscription.paidUntilDate) : null;
 
   const whatsappHref = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(
     `Merhaba, ödememi Havale/EFT ile yaptım. Dekontumu gönderiyorum.\n\nAd Soyad: ${fullName}\nİşletme: ${storeName}\nMağaza Kodu: ${storeCode}`
@@ -105,15 +90,16 @@ export function SubscriptionTab({ storeCode, storeName, fullName, createdAt, isA
           )}
           <div className="min-w-0">
             <p className={`text-base font-bold ${isActive ? 'text-emerald-800' : 'text-red-800'}`}>
-              {isActive ? 'Mağazanız Aktif' : 'Mağazanız Pasif'}
+              {subscription.statusLabel}
             </p>
             <p className={`mt-1 text-sm ${isActive ? 'text-emerald-700' : 'text-red-700'}`}>
-              {isActive
-                ? trialOver
-                  ? 'Aboneliğiniz aktif olarak devam ediyor. Kesintisiz hizmet için ödemelerinizi zamanında yapmanız gerekir.'
-                  : `Ücretsiz deneme sürenizde tüm özellikler açık. Kalan süre: ${daysLeft} gün (bitiş: ${trialEndText}).`
-                : 'Hesabınızın kullanım süresi dolmuştur, lütfen ödeme yapınız. Ödemeniz onaylanana kadar müşteri QR kodu okutamaz ve puan işlemi yapılamaz.'}
+              {subscription.statusMessage}
             </p>
+            {paidUntilText && (
+              <p className={`mt-1 text-xs font-semibold ${isActive ? 'text-emerald-600' : 'text-red-600'}`}>
+                Abonelik geçerlilik tarihi: {paidUntilText}
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -127,7 +113,7 @@ export function SubscriptionTab({ storeCode, storeName, fullName, createdAt, isA
         <div className="grid grid-cols-2 gap-2">
           <div className="rounded-xl bg-gray-50 p-3">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Deneme Süresi</p>
-            <p className="text-sm font-bold text-gray-800">1 Ay (30 Gün)</p>
+            <p className="text-sm font-bold text-gray-800">1 Ay ({TRIAL_DAYS} Gün)</p>
           </div>
           <div className="rounded-xl bg-gray-50 p-3">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Bitiş Tarihi</p>

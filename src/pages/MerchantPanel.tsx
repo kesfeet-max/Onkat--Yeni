@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   QrCode,
@@ -51,6 +51,7 @@ import { withRetry, resilientRpc, resilientQuery } from '../lib/retry';
 import { toast } from '../lib/toast';
 import { triggerCampaignNotification } from '../lib/push-notifications';
 import { SubscriptionTab } from '../components/SubscriptionTab';
+import { resolveMerchantSubscription, buildStoreCode } from '../lib/subscription';
 
 type MerchantTab = 'islem' | 'musteriler' | 'gecmis' | 'abonelik' | 'profilim';
 type ProfileSubTab = 'bilgilerim' | 'kampanyalar' | 'kasiyerler' | 'guvenlik' | 'ayarlar';
@@ -160,6 +161,29 @@ export function MerchantPanel() {
   const [lastResult, setLastResult] = useState<any>(null);
 
   const merchant = profile as any;
+  /**
+   * Abonelik durumu tek noktadan hesaplanır. subscription_status / trial_ends_at /
+   * subscription_paid_until alanları boş veya okunamamış olsa bile güvenli
+   * varsayılanlara düşer, böylece panel beyaz ekran vermez.
+   */
+  const subscription = useMemo(
+    () =>
+      resolveMerchantSubscription({
+        is_active: merchant?.is_active,
+        subscription_status: merchant?.subscription_status,
+        trial_ends_at: merchant?.trial_ends_at,
+        subscription_paid_until: merchant?.subscription_paid_until,
+        created_at: merchant?.created_at,
+      }),
+    [
+      merchant?.is_active,
+      merchant?.subscription_status,
+      merchant?.trial_ends_at,
+      merchant?.subscription_paid_until,
+      merchant?.created_at,
+    ]
+  );
+  const merchantStoreCode = buildStoreCode(merchant?.store_id);
 
   useEffect(() => {
     if (authLoading) return;
@@ -923,9 +947,9 @@ export function MerchantPanel() {
     try {
       // Aktif kasiyer varsa bilgisini ekle
       const activeCashier = cashiers.find((c: any) => c.is_active && c.user_id === user?.id);
-      if (profile?.is_active === false) {
+      if (!subscription.isActive) {
         setProcessing(false);
-        setMessage({ type: 'error', text: 'Hesabınızın kullanım süresi dolmuştur, lütfen ödeme yapınız' });
+        setMessage({ type: 'error', text: subscription.statusMessage });
         setActiveTab('abonelik');
         return;
       }
@@ -990,9 +1014,9 @@ export function MerchantPanel() {
     try {
       // Aktif kasiyer varsa bilgisini ekle
       const activeCashier = cashiers.find((c: any) => c.is_active && c.user_id === user?.id);
-      if (profile?.is_active === false) {
+      if (!subscription.isActive) {
         setProcessing(false);
-        setMessage({ type: 'error', text: 'Hesabınızın kullanım süresi dolmuştur, lütfen ödeme yapınız' });
+        setMessage({ type: 'error', text: subscription.statusMessage });
         setActiveTab('abonelik');
         return;
       }
@@ -1125,7 +1149,7 @@ export function MerchantPanel() {
       {/* Content */}
       <main className="p-4 pb-24 max-w-lg mx-auto">
         {/* İşlem Tab — Pasif hesap engeli (abonelik süresi dolmuş) */}
-        {activeTab === 'islem' && profile?.is_active === false && (
+        {activeTab === 'islem' && !subscription.isActive && (
           <div className="bg-white rounded-2xl shadow-lg p-6 text-center border-2 border-red-200">
             <div className="w-16 h-16 bg-red-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
               <AlertCircle className="w-8 h-8 text-red-600" />
@@ -1145,7 +1169,7 @@ export function MerchantPanel() {
           </div>
         )}
 
-        {activeTab === 'islem' && profile?.is_active !== false && (
+        {activeTab === 'islem' && subscription.isActive && (
           <div className="space-y-4">
             {!customerInfo ? (
               <>
@@ -1731,11 +1755,10 @@ export function MerchantPanel() {
         {/* Abonelik & Ödeme Tab (yalnızca Havale/EFT) */}
         {activeTab === 'abonelik' && (
           <SubscriptionTab
-            storeCode={`ONK-${String(profile?.store_id ?? 0).padStart(4, '0')}`}
-            storeName={profile?.store_name || 'İşletmem'}
-            fullName={profile?.full_name || 'Esnaf'}
-            createdAt={profile?.created_at || ''}
-            isActive={profile?.is_active !== false}
+            storeCode={merchantStoreCode}
+            storeName={merchant?.store_name || 'İşletmem'}
+            fullName={merchant?.full_name || 'Esnaf'}
+            subscription={subscription}
           />
         )}
 
@@ -2485,7 +2508,7 @@ export function MerchantPanel() {
                 : 'text-gray-400'
             }`}
           >
-            {!profile?.is_active && (
+            {subscription.needsPayment && (
               <span className="absolute top-1.5 right-1/4 w-2 h-2 rounded-full bg-red-500 animate-pulse" />
             )}
             <BadgeDollarSign className="w-5 h-5" />

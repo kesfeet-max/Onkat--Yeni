@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { BrandLogo } from '../components/BrandLogo';
 import {
   Users,
@@ -48,6 +48,10 @@ interface CustomerData {
 interface MerchantData {
   id: string;
   user_id: string;
+  /** Abonelik alanları migration çalışmadıysa gelmeyebilir. */
+  subscription_status?: string | null;
+  trial_ends_at?: string | null;
+  subscription_paid_until?: string | null;
   store_id: number;
   phone: string;
   email: string;
@@ -398,13 +402,17 @@ export function AdminPanel() {
   };
 
   const filteredCustomers = customers.filter(c =>
-    c.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.phone.includes(searchTerm) ||
-    (c.email && c.email.toLowerCase().includes(searchTerm.toLowerCase()))
+    (c.full_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (c.phone || '').includes(searchTerm) ||
+    (c.email || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   /** Mağaza kodu formatı: ONK-0042 */
-  const buildStoreCode = (storeId: number) => `ONK-${String(storeId ?? 0).padStart(4, '0')}`;
+  const buildStoreCode = (storeId?: number | string | null) => {
+    const numeric = Number(storeId);
+    const safe = Number.isFinite(numeric) && numeric > 0 ? Math.trunc(numeric) : 0;
+    return `ONK-${String(safe).padStart(4, '0')}`;
+  };
 
   const filteredMerchants = merchants.filter(m => {
     const term = searchTerm.trim().toLowerCase();
@@ -419,10 +427,10 @@ export function AdminPanel() {
 
     return (
       storeCodeMatch ||
-      m.store_name.toLowerCase().includes(term) ||
-      m.phone.includes(searchTerm) ||
-      m.full_name.toLowerCase().includes(term) ||
-      (m.email && m.email.toLowerCase().includes(term))
+      (m.store_name || '').toLowerCase().includes(term) ||
+      (m.phone || '').includes(searchTerm) ||
+      (m.full_name || '').toLowerCase().includes(term) ||
+      (m.email || '').toLowerCase().includes(term)
     );
   });
 
@@ -693,21 +701,21 @@ export function AdminPanel() {
                               <p className="text-xs font-mono font-bold text-primary-600">{buildStoreCode(merchant.store_id)}</p>
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-sm text-gray-600">{merchant.full_name}</td>
-                          <td className="px-4 py-3 text-sm text-gray-600">{merchant.phone}</td>
+                          <td className="px-4 py-3 text-sm text-gray-600">{merchant.full_name || '-'}</td>
+                          <td className="px-4 py-3 text-sm text-gray-600">{merchant.phone || '-'}</td>
                           <td className="px-4 py-3 text-sm text-gray-600">{merchant.email || '-'}</td>
                           <td className="px-4 py-3">
                             <div className="text-sm text-gray-600">
-                              <p>{merchant.city} / {merchant.district}</p>
+                              <p>{merchant.city || '-'} / {merchant.district || '-'}</p>
                               <p className="text-xs text-gray-400">{merchant.latitude && merchant.longitude ? `${merchant.latitude}, ${merchant.longitude}` : 'Konum yok'}</p>
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-sm font-semibold text-primary-600">{formatCurrency(merchant.total_revenue)}</td>
+                          <td className="px-4 py-3 text-sm font-semibold text-primary-600">{formatCurrency(merchant.total_revenue ?? 0)}</td>
                           <td className="px-4 py-3">
                             <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              merchant.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                              merchant.is_active !== false ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
                             }`}>
-                              {merchant.is_active ? 'Aktif' : 'Pasif'}
+                              {merchant.is_active !== false ? 'Aktif' : 'Pasif'}
                             </span>
                           </td>
                           <td className="px-4 py-3">

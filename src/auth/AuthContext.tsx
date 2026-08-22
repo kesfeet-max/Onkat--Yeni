@@ -81,7 +81,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           is_active: merchantData.is_active ?? true,
           created_at: merchantData.created_at || '',
           updated_at: '',
+          subscription_status: null,
+          trial_ends_at: null,
+          subscription_paid_until: null,
         };
+
+        // Abonelik kolonları henüz migration ile eklenmemiş olabilir.
+        // Bu yüzden AYRI ve hataya toleranslı bir sorgu ile okunur; hata olursa
+        // varsayılan (null) değerler korunur ve panel beyaz ekran vermez.
+        try {
+          const { data: subData, error: subErr } = await supabase
+            .from('merchants')
+            .select('subscription_status, trial_ends_at, subscription_paid_until')
+            .eq('user_id', userId)
+            .maybeSingle();
+
+          if (!subErr && subData) {
+            safeMerchant.subscription_status = (subData as any).subscription_status ?? null;
+            safeMerchant.trial_ends_at = (subData as any).trial_ends_at ?? null;
+            safeMerchant.subscription_paid_until = (subData as any).subscription_paid_until ?? null;
+          } else if (subErr) {
+            console.warn('Abonelik alanları okunamadı (varsayılanlar kullanılıyor):', subErr.message);
+          }
+        } catch (subCatchErr) {
+          console.warn('Abonelik alanları sorgusu başarısız:', subCatchErr);
+        }
+
         if (mountedRef.current) setUserRole('merchant');
         return safeMerchant;
       }

@@ -38,6 +38,10 @@ export interface MerchantProfile {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  /** Abonelik alanları opsiyoneldir: migration çalışmadıysa undefined gelir. */
+  subscription_status?: string | null;
+  trial_ends_at?: string | null;
+  subscription_paid_until?: string | null;
 }
 
 export interface Transaction {
