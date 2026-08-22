@@ -66,7 +66,12 @@ function CopyRow({ label, value, mono }: { label: string; value: string; mono?: 
 }
 
 export function SubscriptionTab({ storeCode, storeName, fullName, subscription }: SubscriptionTabProps) {
-  const isActive = subscription.isActive;
+  /**
+   * Durum kartı rengi uyarı şiddetine göre belirlenir.
+   * Süresi dolan esnaf artık engellenmediği için "isActive" tek başına yeterli değildir.
+   */
+  const isActive = subscription.warningLevel === 'none';
+  const isCritical = subscription.warningLevel === 'critical';
   const trialEndText = formatTrDate(subscription.trialEndDate);
   const paidUntilText = subscription.paidUntilDate ? formatTrDate(subscription.paidUntilDate) : null;
 
@@ -79,24 +84,28 @@ export function SubscriptionTab({ storeCode, storeName, fullName, subscription }
       {/* Durum kartı */}
       <div
         className={`rounded-2xl border p-4 shadow-sm ${
-          isActive ? 'border-emerald-200 bg-emerald-50' : 'border-red-200 bg-red-50'
+          isActive
+            ? 'border-emerald-200 bg-emerald-50'
+            : isCritical
+              ? 'border-orange-300 bg-orange-50'
+              : 'border-amber-300 bg-amber-50'
         }`}
       >
         <div className="flex items-start gap-3">
           {isActive ? (
             <ShieldCheck className="mt-0.5 h-6 w-6 shrink-0 text-emerald-600" />
           ) : (
-            <AlertTriangle className="mt-0.5 h-6 w-6 shrink-0 text-red-600" />
+            <AlertTriangle className="mt-0.5 h-6 w-6 shrink-0 text-orange-600" />
           )}
           <div className="min-w-0">
-            <p className={`text-base font-bold ${isActive ? 'text-emerald-800' : 'text-red-800'}`}>
+            <p className={`text-base font-bold ${isActive ? 'text-emerald-800' : 'text-orange-900'}`}>
               {subscription.statusLabel}
             </p>
-            <p className={`mt-1 text-sm ${isActive ? 'text-emerald-700' : 'text-red-700'}`}>
+            <p className={`mt-1 text-sm ${isActive ? 'text-emerald-700' : 'text-orange-800'}`}>
               {subscription.statusMessage}
             </p>
             {paidUntilText && (
-              <p className={`mt-1 text-xs font-semibold ${isActive ? 'text-emerald-600' : 'text-red-600'}`}>
+              <p className={`mt-1 text-xs font-semibold ${isActive ? 'text-emerald-600' : 'text-orange-700'}`}>
                 Abonelik geçerlilik tarihi: {paidUntilText}
               </p>
             )}
@@ -122,7 +131,8 @@ export function SubscriptionTab({ storeCode, storeName, fullName, subscription }
         </div>
         <p className="mt-3 text-xs leading-relaxed text-gray-500">
           Sisteme kayıt olduğunuz günden itibaren 30 gün boyunca tam yetkili ve aktif olarak kullanırsınız.
-          Deneme süresi bittikten sonra ödemesi onaylanmayan hesaplar otomatik olarak pasife alınır.
+          Deneme süreniz bittiğinde paneliniz otomatik olarak kapanmaz, işlemlerinize devam edebilirsiniz. Ancak
+          abonelik ödemenizi yapmadığınız takdirde hesabınız kontrol sonrası yetkilimiz tarafından kapatılabilir.
         </p>
       </div>
 

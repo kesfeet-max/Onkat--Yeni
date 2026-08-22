@@ -23,9 +23,13 @@ import {
   Mail,
   KeyRound,
   Wand2,
+  AlertTriangle,
+  BadgeDollarSign,
+  CalendarClock,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { formatCurrency, formatDate } from '../lib/utils';
+import { resolveMerchantSubscription, formatTrDate } from '../lib/subscription';
 
 interface AdminData {
   id: string;
@@ -67,7 +71,12 @@ interface MerchantData {
   created_at: string;
   latitude?: number;
   longitude?: number;
+  /** Son onaylanan havale/EFT ödemesinin tarihi (migration çalışmadıysa boş gelir). */
+  last_payment_approved_at?: string | null;
 }
+
+/** Esnaf listesi görünüm filtresi */
+type MerchantFilter = 'all' | 'overdue' | 'passive';
 
 interface TransactionData {
   id: string;
@@ -90,6 +99,8 @@ export function AdminPanel() {
   const [merchants, setMerchants] = useState<MerchantData[]>([]);
   const [transactions, setTransactions] = useState<TransactionData[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [merchantFilter, setMerchantFilter] = useState<MerchantFilter>('all');
+  const [extendingId, setExtendingId] = useState<string | null>(null);
   const [stats, setStats] = useState({
     totalCustomers: 0,
     totalMerchants: 0,
@@ -200,9 +211,28 @@ export function AdminPanel() {
 
   const toggleUserStatus = async (table: 'customers' | 'merchants', id: string, currentStatus: boolean) => {
     try {
+      const nextStatus = !currentStatus;
+
+      // Esnaf için önce RPC denenir (RLS'e takılmadan çalışır), olmazsa doğrudan update.
+      if (table === 'merchants') {
+        const { data: rpcData, error: rpcError } = await supabase.rpc('admin_esnaf_durum_degistir', {
+          p_merchant_id: id,
+          p_active: nextStatus,
+        });
+
+        if (!rpcError && rpcData && (rpcData as any).success !== false) {
+          setMessage({
+            type: 'success',
+            text: nextStatus ? 'Esnaf aktif edildi' : 'Esnaf manuel olarak pasife alındı',
+          });
+          fetchData();
+          return;
+        }
+      }
+
       const { error } = await supabase
         .from(table)
-        .update({ is_active: !currentStatus, updated_at: new Date().toISOString() })
+        .update({ is_active: nextStatus, updated_at: new Date().toISOString() })
         .eq('id', id);
 
       if (error) throw error;
@@ -473,6 +503,52 @@ export function AdminPanel() {
     navigate('/');
   };
 
+  /**
+   * Havale/EFT kontrolü sonrası esnafın abonelik süresini uzatır.
+   * Süre uzatma tamamen manuel bir yönetici işlemidir.
+   */
+  const extendSubscription = async (merchant: MerchantData, months: number) => {
+    const storeId = Number(merchant.store_id);
+    if (!Number.isFinite(storeId) || storeId <= 0) {
+      setMessage({ type: 'error', text: 'Bu esnafın mağaza kodu bulunamadı, süre uzatılamıyor.' });
+      return;
+    }
+
+    setExtendingId(merchant.id);
+    setMessage(null);
+    try {
+      const { data, error } = await supabase.rpc('approve_merchant_payment', {
+        p_store_id: storeId,
+        p_months: months,
+      });
+
+      if (error) throw error;
+
+      // Fonksiyon eski sürümde boolean, yeni sürümde json döndürür.
+      if (data && typeof data === 'object' && (data as any).success === false) {
+        setMessage({ type: 'error', text: (data as any).error || 'Süre uzatılamadı' });
+        return;
+      }
+      if (data === false) {
+        setMessage({ type: 'error', text: 'Esnaf bulunamadı, süre uzatılamadı' });
+        return;
+      }
+
+      setMessage({
+        type: 'success',
+        text: `${merchant.store_name || 'Esnaf'} için ödeme onaylandı, abonelik ${months} ay uzatıldı.`,
+      });
+      fetchData();
+    } catch (err: any) {
+      setMessage({
+        type: 'error',
+        text: err?.message || 'Süre uzatma işlemi başarısız oldu. Veritabanı güncellemesini çalıştırdığınızdan emin olun.',
+      });
+    } finally {
+      setExtendingId(null);
+    }
+  };
+
   const filteredCustomers = customers.filter(c =>
     (c.full_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
     (c.phone || '').includes(searchTerm) ||
@@ -504,6 +580,17 @@ export function AdminPanel() {
       (m.full_name || '').toLowerCase().includes(term) ||
       (m.email || '').toLowerCase().includes(term)
     );
+  });
+
+  /** Süresi dolmuş / ödemesi beklenen esnaflar (engellenmezler, sadece uyarı listesinde görünürler). */
+  const overdueMerchants = merchants.filter(m => resolveMerchantSubscription(m).isOverdue);
+  /** Yönetici tarafından manuel pasife alınmış esnaflar. */
+  const passiveMerchants = merchants.filter(m => m.is_active === false);
+
+  const visibleMerchants = filteredMerchants.filter(m => {
+    if (merchantFilter === 'overdue') return resolveMerchantSubscription(m).isOverdue;
+    if (merchantFilter === 'passive') return m.is_active === false;
+    return true;
   });
 
   const filteredTransactions = transactions.filter(t =>
@@ -746,9 +833,57 @@ export function AdminPanel() {
                     />
                   </div>
                   <p className="mt-2 text-xs text-gray-500">
-                    Havale / EFT kontrolü yaptıktan sonra esnafın hesabını "Durum" kolonundaki butonla tek tıkla Aktif
-                    veya Pasif yapabilirsiniz. Sistemde kredi kartı ile ödeme alınmaz.
+                    Süresi dolan esnaflar sistem tarafından otomatik olarak kapatılmaz; çalışmaya devam ederler.
+                    Havale / EFT kontrolünüzü yaptıktan sonra "Süre Uzat" ile aboneliği uzatabilir, gerekirse esnafı
+                    manuel olarak Pasif yapabilirsiniz. Sistemde kredi kartı ile ödeme alınmaz.
                   </p>
+
+                  {/* Geciken ödemeler özeti */}
+                  {overdueMerchants.length > 0 && (
+                    <div className="mt-3 flex items-start gap-2 rounded-xl border border-orange-200 bg-orange-50 px-3 py-2.5">
+                      <AlertTriangle className="w-4 h-4 text-orange-600 shrink-0 mt-0.5" />
+                      <p className="text-xs text-orange-800">
+                        <span className="font-bold">{overdueMerchants.length} esnafın</span> ödeme süresi dolmuş.
+                        Havale/EFT kontrolünden sonra süreyi uzatmanız gerekiyor.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Liste filtreleri */}
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      onClick={() => setMerchantFilter('all')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                        merchantFilter === 'all'
+                          ? 'bg-primary-600 text-white border-primary-600'
+                          : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      Tüm Esnaflar ({merchants.length})
+                    </button>
+                    <button
+                      onClick={() => setMerchantFilter('overdue')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                        merchantFilter === 'overdue'
+                          ? 'bg-orange-600 text-white border-orange-600'
+                          : 'bg-white text-orange-700 border-orange-300 hover:bg-orange-50'
+                      }`}
+                    >
+                      <AlertTriangle className="w-3.5 h-3.5" />
+                      Geciken Ödemeler ({overdueMerchants.length})
+                    </button>
+                    <button
+                      onClick={() => setMerchantFilter('passive')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                        merchantFilter === 'passive'
+                          ? 'bg-red-600 text-white border-red-600'
+                          : 'bg-white text-red-700 border-red-300 hover:bg-red-50'
+                      }`}
+                    >
+                      <X className="w-3.5 h-3.5" />
+                      Pasife Alınanlar ({passiveMerchants.length})
+                    </button>
+                  </div>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full">
@@ -760,13 +895,28 @@ export function AdminPanel() {
                         <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">E-posta</th>
                         <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Konum</th>
                         <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Ciro</th>
+                        <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Abonelik</th>
                         <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Durum</th>
                         <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">İşlemler</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                      {filteredMerchants.map(merchant => (
-                        <tr key={merchant.id} className="hover:bg-gray-50">
+                      {visibleMerchants.map(merchant => {
+                        const sub = resolveMerchantSubscription(merchant);
+                        const periodEnd = sub.hasPaidAccess ? sub.paidUntilDate : sub.trialEndDate;
+                        const isExtending = extendingId === merchant.id;
+
+                        return (
+                        <tr
+                          key={merchant.id}
+                          className={`transition-colors ${
+                            merchant.is_active === false
+                              ? 'bg-red-50/70 hover:bg-red-50'
+                              : sub.isOverdue
+                                ? 'bg-orange-50/70 hover:bg-orange-50'
+                                : 'hover:bg-gray-50'
+                          }`}
+                        >
                           <td className="px-4 py-3">
                             <div>
                               <p className="text-sm font-medium text-gray-900">{merchant.store_name}</p>
@@ -783,6 +933,39 @@ export function AdminPanel() {
                             </div>
                           </td>
                           <td className="px-4 py-3 text-sm font-semibold text-primary-600">{formatCurrency(merchant.total_revenue ?? 0)}</td>
+
+                          {/* Abonelik / ödeme durumu */}
+                          <td className="px-4 py-3">
+                            {sub.isOverdue ? (
+                              <div className="space-y-1">
+                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-bold bg-orange-100 text-orange-700">
+                                  <AlertTriangle className="w-3 h-3" />
+                                  Ödeme Bekleniyor
+                                </span>
+                                <p className="text-[11px] text-orange-700 font-medium">
+                                  {sub.overdueDays > 0 ? `${sub.overdueDays} gün gecikme` : 'Süresi bugün doldu'}
+                                </p>
+                                <p className="text-[11px] text-gray-500">Bitiş: {formatTrDate(periodEnd)}</p>
+                              </div>
+                            ) : (
+                              <div className="space-y-1">
+                                <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold ${
+                                  sub.isEndingSoon
+                                    ? 'bg-amber-100 text-amber-700'
+                                    : sub.hasPaidAccess
+                                      ? 'bg-green-100 text-green-700'
+                                      : 'bg-blue-100 text-blue-700'
+                                }`}>
+                                  <CalendarClock className="w-3 h-3" />
+                                  {sub.hasPaidAccess ? 'Abonelik Aktif' : 'Deneme Süresi'}
+                                </span>
+                                <p className="text-[11px] text-gray-500">
+                                  {sub.daysLeft} gün kaldı · {formatTrDate(periodEnd)}
+                                </p>
+                              </div>
+                            )}
+                          </td>
+
                           <td className="px-4 py-3">
                             <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                               merchant.is_active !== false ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
@@ -791,7 +974,7 @@ export function AdminPanel() {
                             </span>
                           </td>
                           <td className="px-4 py-3">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <button
                                 onClick={() => openMerchantDetail(merchant)}
                                 className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
@@ -807,13 +990,31 @@ export function AdminPanel() {
                                 <Edit className="w-4 h-4" />
                               </button>
                               <button
+                                onClick={() => extendSubscription(merchant, 1)}
+                                disabled={isExtending}
+                                className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:opacity-60 transition-colors"
+                                title="Havale/EFT onaylandı, aboneliği 1 ay uzat"
+                              >
+                                {isExtending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <BadgeDollarSign className="w-3.5 h-3.5" />}
+                                1 Ay Uzat
+                              </button>
+                              <button
+                                onClick={() => extendSubscription(merchant, 12)}
+                                disabled={isExtending}
+                                className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold bg-teal-50 text-teal-700 hover:bg-teal-100 disabled:opacity-60 transition-colors"
+                                title="Havale/EFT onaylandı, aboneliği 12 ay uzat"
+                              >
+                                <CalendarClock className="w-3.5 h-3.5" />
+                                12 Ay
+                              </button>
+                              <button
                                 onClick={() => toggleUserStatus('merchants', merchant.id, merchant.is_active)}
                                 className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
                                   merchant.is_active
                                     ? 'bg-red-50 text-red-600 hover:bg-red-100'
                                     : 'bg-green-50 text-green-700 hover:bg-green-100'
                                 }`}
-                                title={merchant.is_active ? 'Pasif Yap' : 'Havale onaylandı, Aktif Yap'}
+                                title={merchant.is_active ? 'Manuel olarak Pasif Yap' : 'Havale onaylandı, Aktif Yap'}
                               >
                                 {merchant.is_active ? <X className="w-3.5 h-3.5" /> : <CheckCircle className="w-3.5 h-3.5" />}
                                 {merchant.is_active ? 'Pasif Yap' : 'Aktif Yap'}
@@ -821,7 +1022,19 @@ export function AdminPanel() {
                             </div>
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
+                      {visibleMerchants.length === 0 && (
+                        <tr>
+                          <td colSpan={9} className="px-4 py-10 text-center text-sm text-gray-500">
+                            {merchantFilter === 'overdue'
+                              ? 'Ödemesi geciken esnaf bulunmuyor.'
+                              : merchantFilter === 'passive'
+                                ? 'Pasife alınmış esnaf bulunmuyor.'
+                                : 'Kayıtlı esnaf bulunmuyor.'}
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>

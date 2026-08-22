@@ -1147,18 +1147,49 @@ export function MerchantPanel() {
         </div>
       )}
 
+      {/* Ödeme uyarı banner'ı — bilgilendirir, işlem yapmayı ASLA engellemez */}
+      {subscription.warningLevel !== 'none' && !subscription.isSuspended && (
+        <div className="px-4 mt-3 max-w-lg mx-auto">
+          <button
+            onClick={() => setActiveTab('abonelik')}
+            className={`w-full text-left rounded-2xl border p-4 flex items-start gap-3 shadow-sm transition hover:shadow-md ${
+              subscription.warningLevel === 'critical'
+                ? 'bg-gradient-to-r from-amber-50 to-orange-50 border-orange-300'
+                : 'bg-gradient-to-r from-yellow-50 to-amber-50 border-amber-300'
+            }`}
+          >
+            <span className="relative shrink-0 mt-0.5">
+              <span className="absolute inline-flex h-9 w-9 rounded-xl bg-orange-400/40 animate-ping" />
+              <span className="relative w-9 h-9 rounded-xl bg-orange-500 flex items-center justify-center">
+                <AlertCircle className="w-5 h-5 text-white" />
+              </span>
+            </span>
+            <span className="flex-1 min-w-0">
+              <span className="block text-sm font-bold text-orange-900">{subscription.warningTitle}</span>
+              <span className="block text-xs text-orange-800 mt-1 leading-relaxed">
+                {subscription.warningMessage}
+              </span>
+              <span className="mt-2 inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700">
+                <BadgeDollarSign className="w-3.5 h-3.5" />
+                Abonelik & Ödeme sayfasına git
+              </span>
+            </span>
+          </button>
+        </div>
+      )}
+
       {/* Content */}
       <main className="p-4 pb-24 max-w-lg mx-auto">
-        {/* İşlem Tab — Pasif hesap engeli (abonelik süresi dolmuş) */}
+        {/* İşlem Tab — YALNIZCA yönetici manuel pasife aldıysa engellenir */}
         {activeTab === 'islem' && !subscription.isActive && (
           <div className="bg-white rounded-2xl shadow-lg p-6 text-center border-2 border-red-200">
             <div className="w-16 h-16 bg-red-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
               <AlertCircle className="w-8 h-8 text-red-600" />
             </div>
-            <h2 className="text-lg font-bold text-red-700 mb-2">İşlem Yapılamıyor</h2>
+            <h2 className="text-lg font-bold text-red-700 mb-2">Hesabınız Pasif Durumda</h2>
             <p className="text-sm text-gray-600 mb-5">
-              Hesabınızın kullanım süresi dolmuştur, lütfen ödeme yapınız. Ödemeniz onaylanana kadar müşteri QR kodu
-              okutamaz ve puan işlemi yapamazsınız.
+              Hesabınız yönetici tarafından pasife alınmıştır. Havale/EFT dekontunuzu ilettiğinizde hesabınız tekrar
+              açılır ve puan işlemlerine kaldığınız yerden devam edebilirsiniz.
             </p>
             <button
               onClick={() => setActiveTab('abonelik')}
@@ -2510,7 +2541,12 @@ export function MerchantPanel() {
             }`}
           >
             {subscription.needsPayment && (
-              <span className="absolute top-1.5 right-1/4 w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+              <span className="absolute top-0.5 right-1/4 flex items-center justify-center">
+                <span className="absolute w-5 h-5 rounded-full bg-red-500/40 animate-ping" />
+                <span className="relative w-4 h-4 rounded-full bg-red-600 text-white text-[10px] font-black leading-none flex items-center justify-center shadow-md animate-pulse">
+                  !
+                </span>
+              </span>
             )}
             <BadgeDollarSign className="w-5 h-5" />
             <span className="text-[10px] font-semibold">Abonelik</span>

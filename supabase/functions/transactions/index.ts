@@ -278,32 +278,14 @@ Deno.serve(async (req: Request) => {
         });
       }
 
-      // Abonelik / yetki kontrolu: deneme suresi bitmis ve odemesi onaylanmamis
-      // esnaf pasife cekilir ve QR islemi yapmasina izin verilmez.
-      const nowMs = Date.now();
-      const trialEndsMs = merchant.trial_ends_at ? new Date(merchant.trial_ends_at).getTime() : null;
-      const paidUntilMs = merchant.subscription_paid_until
-        ? new Date(merchant.subscription_paid_until).getTime()
-        : null;
-      const subscriptionExpired =
-        trialEndsMs !== null && trialEndsMs < nowMs && (paidUntilMs === null || paidUntilMs < nowMs);
-
-      if (subscriptionExpired && merchant.is_active) {
-        await supabase
-          .from('merchants')
-          .update({
-            is_active: false,
-            subscription_status: 'expired',
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', merchant.id);
-      }
-
-      if (!merchant.is_active || subscriptionExpired) {
+      // OTOMATIK PASIFE CEKME KALDIRILDI.
+      // Deneme veya abonelik suresi dolsa bile esnaf normal sekilde puan yukleyebilir.
+      // Islem YALNIZCA admin hesabi manuel olarak pasife aldiysa engellenir.
+      if (merchant.is_active === false) {
         return new Response(JSON.stringify({
-          error: 'Hesabinizin kullanim suresi dolmustur, lutfen odeme yapiniz',
-          error_tr: 'Hesabınızın kullanım süresi dolmuştur, lütfen ödeme yapınız',
-          code: 'MERCHANT_INACTIVE'
+          error: 'Hesabiniz yonetici tarafindan pasife alinmistir',
+          error_tr: 'Hesabınız yönetici tarafından pasife alınmıştır. Lütfen bizimle iletişime geçin.',
+          code: 'MERCHANT_SUSPENDED'
         }), {
           status: 403,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
