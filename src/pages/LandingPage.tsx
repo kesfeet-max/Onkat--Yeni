@@ -4,7 +4,6 @@ import { PwaInstallBanner } from '../components/PwaInstallBanner';
 import { BrandLogo } from '../components/BrandLogo';
 import {
   TrendingUp,
-  Shield,
   Users,
   ChevronDown,
   ChevronUp,
@@ -12,16 +11,57 @@ import {
   QrCode,
   Wallet,
   Store,
-  Award,
   MessageCircle,
-  Clock
+  Clock,
+  CheckCircle2,
+  Percent,
+  HandCoins,
+  Zap,
+  ShieldCheck,
+  UserPlus,
+  ScanLine,
+  Calculator,
+  Gift,
+  Heart,
+  PiggyBank,
+  Megaphone,
+  Sparkles,
+  CalendarClock
 } from 'lucide-react';
+
+/**
+ * Ana sayfa karşılama alanındaki 4 vurucu avantaj maddesi.
+ * Üye olmayan ziyaretçiler (hem esnaf hem müşteri) için ilk izlenim alanı.
+ */
+const HERO_HIGHLIGHTS = [
+  {
+    icon: Percent,
+    title: "%25'e Varan Puanlar",
+    description: 'Müşterilere kazandıran oranlar',
+  },
+  {
+    icon: HandCoins,
+    title: '0 TL Komisyon',
+    description: 'Esnaflar için sıfır kesinti',
+  },
+  {
+    icon: Zap,
+    title: 'Anında Puan',
+    description: 'Saniyeler içinde cüzdan yüklemesi',
+  },
+  {
+    icon: ShieldCheck,
+    title: 'Güvenli Altyapı',
+    description: 'Şeffaf ve korumalı sistem',
+  },
+] as const;
 
 export function LandingPage() {
   return (
     <div className="min-h-screen">
       <Navbar />
       <Hero />
+      <WhyOnkatiSection />
       <AboutSection />
       <HowItWorksSection />
       <FAQSection />
@@ -89,31 +129,230 @@ function Hero() {
               </Link>
             </div>
           </div>
-          <div className="hidden lg:flex justify-center">
-            <div className="relative">
-              <div className="absolute -inset-4 bg-secondary-400/20 blur-3xl rounded-full"></div>
-              <div className="relative bg-white/10 backdrop-blur-sm rounded-3xl p-8 border border-white/20">
-                <div className="grid grid-cols-2 gap-6">
-                  <div className="text-center">
-                    <div className="text-4xl font-heading font-bold text-secondary-400">%25</div>
-                    <div className="text-sm text-primary-200 mt-1">Varan Puanlar</div>
+          {/* Avantaj kartları — üye olmayan ziyaretçiler için karşılama alanı */}
+          <div className="flex justify-center">
+            <div className="relative w-full max-w-xl">
+              <div className="absolute -inset-6 bg-secondary-400/20 blur-3xl rounded-full"></div>
+              <div className="relative grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {HERO_HIGHLIGHTS.map(({ icon: Icon, title, description }) => (
+                  <div
+                    key={title}
+                    className="group relative overflow-hidden rounded-2xl border border-white/20 bg-white/10 p-5 backdrop-blur-md transition-all duration-300 hover:-translate-y-1 hover:border-secondary-400/60 hover:bg-white/[0.16] hover:shadow-[0_22px_45px_-18px_rgba(0,0,0,0.6)]"
+                  >
+                    {/* Köşedeki altın ışıma */}
+                    <div className="pointer-events-none absolute -right-8 -top-8 h-24 w-24 rounded-full bg-secondary-400/25 blur-2xl opacity-70 transition-opacity duration-300 group-hover:opacity-100"></div>
+
+                    <div className="relative flex items-start gap-3.5">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-secondary-400/40 bg-secondary-400/15 text-secondary-300 transition-transform duration-300 group-hover:scale-110">
+                        <Icon className="h-5 w-5" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-heading text-lg font-bold leading-snug text-white">
+                          {title}
+                        </p>
+                        <p className="mt-1 text-sm leading-relaxed text-primary-100">
+                          {description}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Alt vurgu çizgisi */}
+                    <div className="absolute bottom-0 left-0 h-[3px] w-0 rounded-full bg-gradient-to-r from-secondary-400 to-secondary-300 transition-all duration-500 group-hover:w-full"></div>
                   </div>
-                  <div className="text-center">
-                    <div className="text-4xl font-heading font-bold text-secondary-400">0</div>
-                    <div className="text-sm text-primary-200 mt-1">Pos Komisyonu</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-4xl font-heading font-bold text-secondary-400">0</div>
-                    <div className="text-sm text-primary-200 mt-1">Cihaz Masrafı</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-4xl font-heading font-bold text-secondary-400">GPS</div>
-                    <div className="text-sm text-primary-200 mt-1">Güvenlik Kilidi</div>
-                  </div>
-                </div>
+                ))}
               </div>
             </div>
           </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * "Mahalle Kültürü" bölümünün sağındaki 4 açıklayıcı kart.
+ * Metinler net, profesyonel ve doğrulanabilir bilgiler içerir.
+ */
+const ABOUT_CARDS = [
+  {
+    icon: TrendingUp,
+    title: 'Net Kazanç',
+    description: "Her alışverişte %25'e varan puanlar birikir, cüzdanınız anında dolar."
+  },
+  {
+    icon: HandCoins,
+    title: 'Sıfır Komisyon',
+    description: 'Esnaflarımız kazancından kesinti yaşamaz, tüm gelir işletmede kalır.'
+  },
+  {
+    icon: Users,
+    title: 'Mahalle Dayanışması',
+    description: 'Esnaf ve müşteri birlikte güçlenir, mahalle ekonomisi canlanır.'
+  },
+  {
+    icon: QrCode,
+    title: 'Kolay Kullanım',
+    description: 'Müşteri sabit QR kodunu gösterir, esnaf kasada okutup tutarı girer. Saniyeler içinde işlem tamamlanır.'
+  }
+];
+
+const ABOUT_FEATURES = ['Cihaz masrafı yok', 'Pos komisyonu yok', 'Ekstra donanım gerektirmez'];
+
+/** "Neden Onkatı?" bölümündeki esnaf tarafı avantajları. */
+const MERCHANT_BENEFITS = [
+  {
+    icon: CalendarClock,
+    label: 'Boş Zamanlara Çözüm',
+    text: 'Dükkanın boş kaldığı sakin saatlerde müşterilerinize özel ek puan avantajları sunarak dükkanınızı yeniden hareketlendirin.'
+  },
+  {
+    icon: HandCoins,
+    label: 'Sıfır Komisyon & Maliyet',
+    text: 'Banka POS komisyonları veya pahalı reklam ajansları yok; kazancınız tamamen cebinizde kalır.'
+  },
+  {
+    icon: Heart,
+    label: 'Sıcak Esnaf İlişkisi',
+    text: 'Mahallenin favori esnafı olun, dijital dünyanın soğukluğunda kaybolmadan müşterinizle birebir bağ kurun.'
+  }
+] as const;
+
+/** "Neden Onkatı?" bölümündeki müşteri tarafı avantajları. */
+const CUSTOMER_BENEFITS = [
+  {
+    icon: PiggyBank,
+    label: 'Gerçek Tasarruf',
+    text: "Artan hayat pahalılığında ve enflasyonda bütçenizi koruyun; her alışverişte %25'e varan net puanlar biriktirin."
+  },
+  {
+    icon: Store,
+    label: 'Sıcak Esnaf Güveni',
+    text: 'Tanıdığınız, bildiğiniz mahalle esnafından güvenle alışveriş yapın, her alışverişiniz size ve çevrenize geri dönsün.'
+  },
+  {
+    icon: QrCode,
+    label: 'Anında Cüzdan Kolaylığı',
+    text: 'Karmaşık uygulamalar veya kartlar taşımanıza gerek yok; sabit QR kodunuzu gösterin, saniyeler içinde puanlarınız cüzdanınıza yansısın.'
+  }
+] as const;
+
+interface BenefitCardProps {
+  eyebrow: string;
+  eyebrowIcon: typeof Store;
+  title: string;
+  benefits: readonly { icon: typeof Store; label: string; text: string }[];
+  variant: 'merchant' | 'customer';
+}
+
+/**
+ * "Neden Onkatı?" bölümünde kullanılan büyük avantaj kartı.
+ * variant, esnaf (altın) ve müşteri (yeşil) renk şemasını belirler.
+ */
+function BenefitCard({ eyebrow, eyebrowIcon: EyebrowIcon, title, benefits, variant }: BenefitCardProps) {
+  const isMerchant = variant === 'merchant';
+
+  const styles = isMerchant
+    ? {
+        card: 'border-secondary-200 hover:border-secondary-400',
+        glow: 'from-secondary-100/70',
+        badge: 'bg-secondary-500/10 text-secondary-700 ring-1 ring-secondary-500/20',
+        title: 'text-secondary-800',
+        iconBox: 'bg-secondary-500/10 text-secondary-700 group-hover/item:bg-secondary-500 group-hover/item:text-white',
+        rule: 'bg-secondary-500'
+      }
+    : {
+        card: 'border-primary-200 hover:border-primary-400',
+        glow: 'from-primary-100/70',
+        badge: 'bg-primary-600/10 text-primary-700 ring-1 ring-primary-600/20',
+        title: 'text-primary-800',
+        iconBox: 'bg-primary-600/10 text-primary-700 group-hover/item:bg-primary-600 group-hover/item:text-white',
+        rule: 'bg-primary-600'
+      };
+
+  return (
+    <div
+      className={`group relative overflow-hidden rounded-3xl border-2 bg-white p-7 shadow-lg transition-all duration-300 hover:-translate-y-1 hover:shadow-2xl sm:p-9 ${styles.card}`}
+    >
+      <div
+        className={`pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-gradient-to-br to-transparent blur-2xl ${styles.glow}`}
+      />
+
+      <div className="relative">
+        <span
+          className={`inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-wide sm:text-sm ${styles.badge}`}
+        >
+          <EyebrowIcon className="h-4 w-4" />
+          {eyebrow}
+        </span>
+
+        <h3 className={`mt-5 font-heading text-2xl font-bold leading-snug sm:text-3xl ${styles.title}`}>
+          {title}
+        </h3>
+
+        <div className={`mt-5 h-1 w-16 rounded-full ${styles.rule}`} />
+
+        <ul className="mt-7 space-y-6">
+          {benefits.map((benefit) => {
+            const BenefitIcon = benefit.icon;
+
+            return (
+              <li key={benefit.label} className="group/item flex gap-4">
+                <span
+                  className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl transition-colors duration-300 ${styles.iconBox}`}
+                >
+                  <BenefitIcon className="h-6 w-6" />
+                </span>
+                <div>
+                  <p className="font-heading text-base font-bold text-gray-900 sm:text-lg">{benefit.label}</p>
+                  <p className="mt-1 text-sm leading-relaxed text-gray-600 sm:text-base">{benefit.text}</p>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Yeşil karşılama alanının hemen altındaki ilk beyaz bölüm.
+ * Esnaf ve müşteri tarafının kazancını yan yana iki büyük kartta anlatır.
+ */
+function WhyOnkatiSection() {
+  return (
+    <section className="bg-white py-20">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div className="mb-14 text-center">
+          <span className="inline-flex items-center gap-2 rounded-full bg-primary-50 px-4 py-1.5 text-sm font-semibold text-primary-700 ring-1 ring-primary-100">
+            <Sparkles className="h-4 w-4" />
+            Avantajlar ve Çözümler
+          </span>
+          <h2 className="mt-5 font-heading text-3xl font-bold text-primary-700 md:text-4xl">
+            Neden Onkatı?
+          </h2>
+          <p className="mx-auto mt-4 max-w-2xl text-gray-600">
+            Onkatı tek taraflı bir kampanya değil; esnafın kazancını korurken müşterinin bütçesini rahatlatan
+            karşılıklı bir kazanç bağıdır.
+          </p>
+          <div className="mx-auto mt-4 h-1 w-24 rounded-full bg-secondary-500" />
+        </div>
+
+        <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
+          <BenefitCard
+            eyebrow="Esnaflar İçin Neden Onkatı?"
+            eyebrowIcon={Megaphone}
+            title="Reklam Bütçelerini Çöpe Atmayın, Sadık Müşteri Kazanın"
+            benefits={MERCHANT_BENEFITS}
+            variant="merchant"
+          />
+          <BenefitCard
+            eyebrow="Müşteriler İçin Neden Onkatı?"
+            eyebrowIcon={Wallet}
+            title="Alışveriş Yaptıkça Kazanın, Bütçenizi Koruyun"
+            benefits={CUSTOMER_BENEFITS}
+            variant="customer"
+          />
         </div>
       </div>
     </section>
@@ -126,7 +365,7 @@ function AboutSection() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="text-center mb-16">
           <h2 className="text-3xl md:text-4xl font-heading font-bold text-primary-700 mb-4">
-            Biz Kimiz? Felsefemiz Nereden Geliyor?
+            Mahalle Kültürü, Modern Sadakatle Buluşuyor
           </h2>
           <div className="w-24 h-1 bg-secondary-500 mx-auto rounded-full"></div>
         </div>
@@ -134,78 +373,174 @@ function AboutSection() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
           <div>
             <p className="text-lg text-gray-700 leading-relaxed mb-6">
-              Biz, kurumsal devlerin sadece kendi kasalarını dolduran puan sistemlerine karşı,
-              mahalle kültürüyle birleştirici bir <span className="font-semibold text-primary-600">dayanışma direnişiyiz</span>.
+              <span className="text-secondary-600 font-semibold">'Damla damla göl olur'</span> vizyonuyla;
+              kurumsal devlerin kasalarını dolduran sistemlere karşı, mahalle esnafını ve komşularımızı
+              birbirine bağlayan <span className="font-semibold text-primary-600">yerel bir dayanışma hareketi</span> kurduk.
             </p>
             <p className="text-lg text-gray-700 leading-relaxed mb-6">
-              <span className="text-secondary-600 font-semibold">'Damlaya damlaya göl olur'</span> vizyonuyla,
-              hem halkımızın bütçesine net %25'e varan puanlar kazandırıyoruz hem de esnafımızın ciro gücü mahallede çalışıyor.
+              Müşterilerimiz alışveriş yaptıkça biriken puanlarla bütçesini korurken, esnafımız
+              komisyonsuz ve sadık bir müşteri ağı kazanır.
             </p>
-            <div className="flex flex-wrap gap-4 mt-8">
-              <div className="flex items-center gap-2 text-primary-700">
-                <Award className="w-5 h-5 text-secondary-500" />
-                <span className="font-medium">Cihaz yok</span>
-              </div>
-              <div className="flex items-center gap-2 text-primary-700">
-                <Award className="w-5 h-5 text-secondary-500" />
-                <span className="font-medium">Pos komisyonu yok</span>
-              </div>
-              <div className="flex items-center gap-2 text-primary-700">
-                <Award className="w-5 h-5 text-secondary-500" />
-                <span className="font-medium">Yardımat gücü yok</span>
-              </div>
+            <div className="mt-8 flex flex-wrap gap-3">
+              {ABOUT_FEATURES.map((feature) => (
+                <span
+                  key={feature}
+                  className="inline-flex items-center gap-2 rounded-full border border-primary-100 bg-white px-4 py-2 text-sm font-medium text-primary-700 shadow-sm"
+                >
+                  <CheckCircle2 className="h-4 w-4 text-secondary-500" />
+                  {feature}
+                </span>
+              ))}
             </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-            <div className="bg-white p-6 rounded-2xl shadow-lg border border-gray-100 hover:shadow-xl transition-shadow">
-              <div className="w-12 h-12 bg-primary-100 rounded-xl flex items-center justify-center mb-4">
-                <TrendingUp className="w-6 h-6 text-primary-600" />
+            {ABOUT_CARDS.map(({ icon: Icon, title, description }) => (
+              <div
+                key={title}
+                className="group relative overflow-hidden rounded-2xl border border-gray-100 bg-white p-6 shadow-lg transition-all duration-300 hover:-translate-y-1 hover:border-secondary-200 hover:shadow-2xl"
+              >
+                <div className="pointer-events-none absolute -right-10 -top-10 h-24 w-24 rounded-full bg-secondary-200/50 blur-2xl opacity-0 transition-opacity duration-300 group-hover:opacity-100"></div>
+                <div className="relative mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-primary-600 to-primary-800 text-white shadow-md transition-transform duration-300 group-hover:scale-110">
+                  <Icon className="h-6 w-6" />
+                </div>
+                <h3 className="relative mb-2 font-heading text-lg font-semibold text-gray-900">
+                  {title}
+                </h3>
+                <p className="relative text-sm leading-relaxed text-gray-600">
+                  {description}
+                </p>
               </div>
-              <h3 className="font-heading font-semibold text-lg text-gray-900 mb-2">
-                Net Kazanç
-              </h3>
-              <p className="text-gray-600 text-sm">
-                Her alışverişte %25'e varan puanlar kazan. Puanlar birikir, cebin dolar.
-              </p>
-            </div>
-            <div className="bg-white p-6 rounded-2xl shadow-lg border border-gray-100 hover:shadow-xl transition-shadow">
-              <div className="w-12 h-12 bg-secondary-100 rounded-xl flex items-center justify-center mb-4">
-                <Shield className="w-6 h-6 text-secondary-600" />
-              </div>
-              <h3 className="font-heading font-semibold text-lg text-gray-900 mb-2">
-                Güvenli Sistem
-              </h3>
-              <p className="text-gray-600 text-sm">
-                GPS kilidiyle sahte işlemler engellenir. Askeri düzeyde kripto.
-              </p>
-            </div>
-            <div className="bg-white p-6 rounded-2xl shadow-lg border border-gray-100 hover:shadow-xl transition-shadow">
-              <div className="w-12 h-12 bg-primary-100 rounded-xl flex items-center justify-center mb-4">
-                <Users className="w-6 h-6 text-primary-600" />
-              </div>
-              <h3 className="font-heading font-semibold text-lg text-gray-900 mb-2">
-                Mahalle Dayanışması
-              </h3>
-              <p className="text-gray-600 text-sm">
-                Esnaf ve müşteri birlikte güçlenir. Mahalle ekonomisi canlanır.
-              </p>
-            </div>
-            <div className="bg-white p-6 rounded-2xl shadow-lg border border-gray-100 hover:shadow-xl transition-shadow">
-              <div className="w-12 h-12 bg-secondary-100 rounded-xl flex items-center justify-center mb-4">
-                <QrCode className="w-6 h-6 text-secondary-600" />
-              </div>
-              <h3 className="font-heading font-semibold text-lg text-gray-900 mb-2">
-                Basit Kullanım
-              </h3>
-              <p className="text-gray-600 text-sm">
-                QR kod tara, onayla, kazan. Şifremetik güzergah.
-              </p>
-            </div>
+            ))}
           </div>
         </div>
       </div>
     </section>
+  );
+}
+
+/**
+ * Gerçek işleyişe göre müşteri adımları.
+ * Müşteri kendi sabit QR kodunu gösterir; esnafın kodunu taramaz.
+ */
+const CUSTOMER_STEPS = [
+  {
+    icon: UserPlus,
+    title: 'Kayıt Ol',
+    description: 'Telefon numaranla saniyeler içinde hızlıca kayıt ol, kişisel cüzdanını aç.'
+  },
+  {
+    icon: QrCode,
+    title: 'QR Kodunu Göster',
+    description: 'Kasadaki alışveriş sırasında telefonundaki sabit kişisel QR kodunu esnafa göster.'
+  },
+  {
+    icon: Zap,
+    title: 'Puanını Al',
+    description: 'Esnaf alışveriş tutarını girdiğinde puanın anında cüzdanına yansısın.'
+  },
+  {
+    icon: Gift,
+    title: 'Puanlarını Harca',
+    description: 'Kazandığın puanları biriktir, aynı dükkanda sonraki alışverişlerinde indirim olarak doya doya kullan.'
+  }
+];
+
+/**
+ * Gerçek işleyişe göre esnaf adımları.
+ * Esnaf kasada müşterinin QR kodunu okutur; kasaya karekod asmaz.
+ */
+const MERCHANT_STEPS = [
+  {
+    icon: Store,
+    title: 'Hızlıca Katıl',
+    description: 'İşletme bilgilerini girerek sisteme hemen dükkanını kaydet.'
+  },
+  {
+    icon: ScanLine,
+    title: 'Müşteri QR Kodunu Okut',
+    description: 'Kasandaki telefon, tablet veya bilgisayardan esnaf paneline gir, müşterinin uzattığı QR kodu okut.'
+  },
+  {
+    icon: Calculator,
+    title: 'Tutar Gir & Onayla',
+    description: 'Alışveriş tutarını sisteme gir ve puan yükleme işlemini anında onayla.'
+  },
+  {
+    icon: Heart,
+    title: 'Sadık Müşteri Kazan',
+    description: "Müşterine %25'e varan puanlar vererek cironu artır, mahallenin favori esnafı ol."
+  }
+];
+
+type FlowStep = {
+  icon: typeof Store;
+  title: string;
+  description: string;
+};
+
+type FlowColumnProps = {
+  title: string;
+  headerIcon: typeof Store;
+  steps: FlowStep[];
+  variant: 'customer' | 'merchant';
+};
+
+/**
+ * Nasıl Çalışır bölümünün tek bir sütununu (müşteri veya esnaf akışı) render eder.
+ */
+function FlowColumn({ title, headerIcon: HeaderIcon, steps, variant }: FlowColumnProps) {
+  const isCustomer = variant === 'customer';
+
+  const cardClass = isCustomer
+    ? 'bg-gradient-to-br from-primary-50 to-primary-100 border-primary-100'
+    : 'bg-gradient-to-br from-secondary-50 to-secondary-100 border-secondary-200';
+  const titleClass = isCustomer ? 'text-primary-700' : 'text-secondary-700';
+  const badgeClass = isCustomer
+    ? 'bg-primary-600 text-white'
+    : 'bg-secondary-600 text-white';
+  const iconClass = isCustomer
+    ? 'bg-white text-primary-600 ring-primary-200'
+    : 'bg-white text-secondary-600 ring-secondary-200';
+  const lineClass = isCustomer ? 'bg-primary-200' : 'bg-secondary-200';
+
+  return (
+    <div className={`rounded-2xl border p-6 sm:p-8 shadow-sm ${cardClass}`}>
+      <h3 className={`mb-8 flex items-center gap-3 font-heading text-2xl font-bold ${titleClass}`}>
+        <HeaderIcon className="h-7 w-7" />
+        {title}
+      </h3>
+
+      <ol className="space-y-6">
+        {steps.map(({ icon: Icon, title: stepTitle, description }, index) => (
+          <li key={stepTitle} className="relative flex gap-4">
+            {/* Adımları birbirine bağlayan dikey çizgi */}
+            {index < steps.length - 1 && (
+              <span
+                className={`absolute left-[21px] top-12 h-[calc(100%+0.5rem)] w-0.5 ${lineClass}`}
+                aria-hidden="true"
+              ></span>
+            )}
+
+            <div className="relative z-10 shrink-0">
+              <div className={`flex h-11 w-11 items-center justify-center rounded-xl ring-1 shadow-sm ${iconClass}`}>
+                <Icon className="h-5 w-5" />
+              </div>
+              <span
+                className={`absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold shadow ${badgeClass}`}
+              >
+                {index + 1}
+              </span>
+            </div>
+
+            <div className="pt-1">
+              <p className="font-heading font-semibold text-gray-900">{stepTitle}</p>
+              <p className="mt-1 text-sm leading-relaxed text-gray-600">{description}</p>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }
 
@@ -217,106 +552,65 @@ function HowItWorksSection() {
           <h2 className="text-3xl md:text-4xl font-heading font-bold text-primary-700 mb-4">
             Nasıl Çalışır?
           </h2>
-          <div className="w-24 h-1 bg-secondary-500 mx-auto rounded-full"></div>
+          <p className="mx-auto max-w-2xl text-gray-600">
+            Kasada tek hareketle tamamlanan, cihaz gerektirmeyen basit bir akış.
+          </p>
+          <div className="w-24 h-1 bg-secondary-500 mx-auto rounded-full mt-4"></div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
-          <div className="bg-gradient-to-br from-primary-50 to-primary-100 p-8 rounded-2xl">
-            <h3 className="text-2xl font-heading font-bold text-primary-700 mb-6 flex items-center gap-3">
-              <Wallet className="w-7 h-7" />
-              Müşteriler İçin
-            </h3>
-            <ol className="space-y-4">
-              <li className="flex gap-4">
-                <span className="flex-shrink-0 w-8 h-8 bg-primary-600 text-white rounded-full flex items-center justify-center font-bold text-sm">1</span>
-                <div>
-                  <p className="font-semibold text-gray-900">Kayıt Ol</p>
-                  <p className="text-gray-600 text-sm">Telefon numaran ile hızlı kayıt.</p>
-                </div>
-              </li>
-              <li className="flex gap-4">
-                <span className="flex-shrink-0 w-8 h-8 bg-primary-600 text-white rounded-full flex items-center justify-center font-bold text-sm">2</span>
-                <div>
-                  <p className="font-semibold text-gray-900">QR Tara</p>
-                  <p className="text-gray-600 text-sm">Esnafın karekodunu kamerayla oku.</p>
-                </div>
-              </li>
-              <li className="flex gap-4">
-                <span className="flex-shrink-0 w-8 h-8 bg-primary-600 text-white rounded-full flex items-center justify-center font-bold text-sm">3</span>
-                <div>
-                  <p className="font-semibold text-gray-900">Tutar Gir & Onayla</p>
-                  <p className="text-gray-600 text-sm">Alışveriş tutarını gir, esnaftan onaylat.</p>
-                </div>
-              </li>
-              <li className="flex gap-4">
-                <span className="flex-shrink-0 w-8 h-8 bg-secondary-500 text-white rounded-full flex items-center justify-center font-bold text-sm">4</span>
-                <div>
-                  <p className="font-semibold text-gray-900">Kazan!</p>
-                  <p className="text-gray-600 text-sm">Her harcamanın %25'e varanı puana dönüşür.</p>
-                </div>
-              </li>
-            </ol>
-          </div>
-
-          <div className="bg-gradient-to-br from-secondary-50 to-secondary-100 p-8 rounded-2xl">
-            <h3 className="text-2xl font-heading font-bold text-secondary-700 mb-6 flex items-center gap-3">
-              <Store className="w-7 h-7" />
-              Esnaflar İçin
-            </h3>
-            <ol className="space-y-4">
-              <li className="flex gap-4">
-                <span className="flex-shrink-0 w-8 h-8 bg-secondary-600 text-white rounded-full flex items-center justify-center font-bold text-sm">1</span>
-                <div>
-                  <p className="font-semibold text-gray-900">Dükkanını Kaydet</p>
-                  <p className="text-gray-600 text-sm">Dükkan bilgilerin ve konumunu gir.</p>
-                </div>
-              </li>
-              <li className="flex gap-4">
-                <span className="flex-shrink-0 w-8 h-8 bg-secondary-600 text-white rounded-full flex items-center justify-center font-bold text-sm">2</span>
-                <div>
-                  <p className="font-semibold text-gray-900">Karekod Oluştur</p>
-                  <p className="text-gray-600 text-sm">Panelinden QR kodunu indir ve kasana as.</p>
-                </div>
-              </li>
-              <li className="flex gap-4">
-                <span className="flex-shrink-0 w-8 h-8 bg-secondary-600 text-white rounded-full flex items-center justify-center font-bold text-sm">3</span>
-                <div>
-                  <p className="font-semibold text-gray-900">Müşterileri Onayla</p>
-                  <p className="text-gray-600 text-sm">Müşteri telefonunu al, onayla butonuna bas.</p>
-                </div>
-              </li>
-              <li className="flex gap-4">
-                <span className="flex-shrink-0 w-8 h-8 bg-primary-600 text-white rounded-full flex items-center justify-center font-bold text-sm">4</span>
-                <div>
-                  <p className="font-semibold text-gray-900">Büyü!</p>
-                  <p className="text-gray-600 text-sm">Sadık müşterilerle ciron artsın.</p>
-                </div>
-              </li>
-            </ol>
-          </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 lg:gap-12">
+          <FlowColumn
+            title="Müşteriler İçin"
+            headerIcon={Wallet}
+            steps={CUSTOMER_STEPS}
+            variant="customer"
+          />
+          <FlowColumn
+            title="Esnaflar İçin"
+            headerIcon={Store}
+            steps={MERCHANT_STEPS}
+            variant="merchant"
+          />
         </div>
       </div>
     </section>
   );
 }
 
-function FAQSection() {
-  const [openIndex, setOpenIndex] = useState<number | null>(null);
+/**
+ * Sıkça Sorulan Sorular içeriği.
+ * Metinler gerçek işleyişe göre yazılmıştır: bulut tabanlı web uygulaması,
+ * havuz sistemi değil, komisyonsuz ve müşteriye ait sabit şifreli QR kod.
+ */
+const FAQ_ITEMS = [
+  {
+    icon: Store,
+    question: 'Esnaf olarak bu sistemde neden hiçbir cihaz kurmuyorum?',
+    answer:
+      'Çünkü Onkatı tamamen bulut tabanlı bir web uygulamasıdır. Ekstra bir POS cihazı, kablo veya donanım maliyeti gerektirmez. Kasadaki akıllı telefonunuz, tabletiniz veya bilgisayarınız üzerinden saniyeler içinde işlem yapabilirsiniz.'
+  },
+  {
+    icon: Wallet,
+    question: 'Kazanılan puanlar ne kadar süre geçerlidir ve nerede harcanır?',
+    answer:
+      'Onkatı bir havuz sistemi değildir. Müşteriler kazandıkları puanları sadece puanı aldıkları aynı esnafta sonraki alışverişlerinde indirim veya nakit gibi harcayabilirler. Puanların geçerlilik süresi işletmenin kurallarına göre esnektir.'
+  },
+  {
+    icon: HandCoins,
+    question: 'Sistemde komisyon veya gizli masraf var mı?',
+    answer:
+      'Kesinlikle yok! Esnaflardan asla pos komisyonu veya kullanım ücreti alınmaz. Müşteriler için de tamamen ücretsizdir. Tamamen esnaf ile sadık müşterisi arasındaki kazanç bağıdır.'
+  },
+  {
+    icon: ShieldCheck,
+    question: 'İşlemlerin güvenliği nasıl sağlanıyor?',
+    answer:
+      'Her müşterinin kendine ait sabit ve şifreli bir QR kodu bulunur. Esnaf paneli üzerinden sadece yetkili işletme hesabıyla bu kod okunarak güvenli ve şeffaf bir şekilde puan yüklemesi gerçekleştirilir, böylece yetkisiz işlemlerin önüne geçilir.'
+  }
+];
 
-  const faqs = [
-    {
-      question: 'Esnaf olarak bu sistemde neden hiçbir cihaz kurmuyorum?',
-      answer: 'Çünkü tüm işlem bileşenlerinde döner. Siz sadece gözünüzle bakarak kontrol eder, parmağınızla onaylarsınız. Ekstra masrafa, teknik arızaya gerek yok! Sadece bir QR kod ve akıllı telefon yeterli.',
-    },
-    {
-      question: 'Kazanılan puanlar (TL\'ler) ne kadar süre geçerlidir?',
-      answer: 'Biriktirdiğiniz puanlar aydan itibaren istediğiniz zaman aynı dükkan harcanabilir. Paranız asla kaybolmaz, puanlarınız süresiz olarak hesabınızda kalır.',
-    },
-    {
-      question: 'Sistemimiz güvenli mi?',
-      answer: 'Evet. Sistemimizin çift yönlü konumsal (GPS) çalıştırılması ve askeri düzeyde kriptolu olarak sunulması ile korunmaktadır. Dükkan dışından sahte işlem yapılması engellenir. Tüm verileriniz güvenle saklanır.',
-    },
-  ];
+function FAQSection() {
+  const [openIndex, setOpenIndex] = useState<number | null>(0);
 
   return (
     <section className="py-20 bg-gray-50">
@@ -325,40 +619,55 @@ function FAQSection() {
           <h2 className="text-3xl md:text-4xl font-heading font-bold text-primary-700 mb-4">
             Sıkça Sorulan Sorular
           </h2>
-          <p className="text-gray-600">Güven tazeleyelim</p>
+          <p className="text-gray-600">Esnafımızın ve müşterilerimizin en çok merak ettikleri</p>
           <div className="w-24 h-1 bg-secondary-500 mx-auto rounded-full mt-4"></div>
         </div>
 
         <div className="space-y-4">
-          {faqs.map((faq, index) => (
+          {FAQ_ITEMS.map((faq, index) => {
+            const isOpen = openIndex === index;
+            const FaqIcon = faq.icon;
+
+            return (
             <div
-              key={index}
-              className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden"
+              key={faq.question}
+              className={`overflow-hidden rounded-2xl border bg-white shadow-md transition-all duration-300 ${
+                isOpen ? 'border-secondary-300 shadow-lg' : 'border-gray-100 hover:border-primary-200'
+              }`}
             >
               <button
-                onClick={() => setOpenIndex(openIndex === index ? null : index)}
-                className="w-full px-6 py-5 flex items-center justify-between text-left hover:bg-gray-50 transition-colors"
+                onClick={() => setOpenIndex(isOpen ? null : index)}
+                aria-expanded={isOpen}
+                className="flex w-full items-center gap-4 px-5 py-5 text-left transition-colors hover:bg-gray-50 sm:px-6"
               >
-                <span className="font-heading font-semibold text-lg text-gray-900 pr-4">
+                <span
+                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors ${
+                    isOpen ? 'bg-primary-600 text-white' : 'bg-primary-50 text-primary-600'
+                  }`}
+                >
+                  <FaqIcon className="h-5 w-5" />
+                </span>
+                <span className="flex-1 pr-2 font-heading text-base font-semibold text-gray-900 sm:text-lg">
                   {faq.question}
                 </span>
                 <span className="flex-shrink-0">
-                  {openIndex === index ? (
+                  {isOpen ? (
                     <ChevronUp className="w-5 h-5 text-primary-600" />
                   ) : (
                     <ChevronDown className="w-5 h-5 text-gray-400" />
                   )}
                 </span>
               </button>
-              {openIndex === index && (
-                <div className="px-6 pb-5">
-                  <div className="pt-2 border-t border-gray-100">
-                    <p className="text-gray-600 leading-relaxed mt-4">{faq.answer}</p>
+              {isOpen && (
+                <div className="px-5 pb-6 sm:px-6">
+                  <div className="border-t border-gray-100 pl-0 pt-4 sm:pl-14">
+                    <p className="leading-relaxed text-gray-600">{faq.answer}</p>
                   </div>
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </section>
