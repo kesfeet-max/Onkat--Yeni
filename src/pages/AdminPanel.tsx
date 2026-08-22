@@ -251,11 +251,28 @@ export function AdminPanel() {
     fetchMerchantCredentials(merchant);
   };
 
-  // Esnafin gercek giris e-postasini auth tablosundan getirir
+  /**
+   * Esnafın gerçek giriş (auth) e-postasını getirir.
+   *
+   * Önce doğrudan veritabanı RPC'si denenir (Edge Function deploy edilmemiş
+   * olsa bile çalışır). RPC bulunamazsa Edge Function'a geri dönülür.
+   */
   const fetchMerchantCredentials = async (merchant: MerchantData) => {
     if (!merchant.user_id) return;
     setLoadingCred(true);
     try {
+      const { data: rpcData, error: rpcError } = await supabase.rpc('admin_esnaf_giris_bilgisi', {
+        p_user_id: merchant.user_id,
+      });
+
+      const rpcResult = rpcData as any;
+      if (!rpcError && rpcResult?.success) {
+        setCredInfo({ email: rpcResult.email || '', last_sign_in_at: rpcResult.last_sign_in_at ?? null });
+        setCredForm((prev) => ({ ...prev, email: rpcResult.email || merchant.email || '' }));
+        return;
+      }
+
+      // 2) Yedek yol: Edge Function
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
 
@@ -271,9 +288,13 @@ export function AdminPanel() {
       if (response.ok && data.success) {
         setCredInfo({ email: data.email || '', last_sign_in_at: data.last_sign_in_at });
         setCredForm((prev) => ({ ...prev, email: data.email || merchant.email || '' }));
+      } else {
+        // Hiçbiri çalışmadıysa en azından tablodaki e-postayı göster
+        setCredInfo({ email: merchant.email || '', last_sign_in_at: null });
       }
     } catch (err) {
       console.error('Giris bilgisi alinamadi:', err);
+      setCredInfo({ email: merchant.email || '', last_sign_in_at: null });
     } finally {
       setLoadingCred(false);
     }
@@ -327,32 +348,67 @@ export function AdminPanel() {
     setSavingCred(true);
     setCredMessage(null);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) throw new Error('Oturum bulunamadı');
+      if (!editingMerchant.user_id) {
+        throw new Error('Bu esnafın giriş hesabı bulunamadı (kullanıcı kimliği yok).');
+      }
 
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-data`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          action: 'update_merchant_credentials',
-          merchant_id: editingMerchant.id,
-          user_id: editingMerchant.user_id,
-          email: emailChanged ? newEmail : '',
-          password: newPassword,
-        }),
+      let result: { email_updated?: boolean; password_updated?: boolean } | null = null;
+
+      // 1) Öncelikli yol: veritabanı RPC'si (Edge Function deploy gerektirmez)
+      const { data: rpcData, error: rpcError } = await supabase.rpc('admin_esnaf_giris_guncelle', {
+        p_user_id: editingMerchant.user_id,
+        p_merchant_id: editingMerchant.id,
+        p_email: emailChanged ? newEmail : null,
+        p_password: newPassword || null,
       });
 
-      const data = await response.json();
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Güncelleme başarısız');
+      const rpcResult = rpcData as any;
+
+      if (!rpcError && rpcResult) {
+        if (!rpcResult.success) {
+          // RPC çalıştı ama iş kuralı hatası döndü — doğrudan kullanıcıya göster
+          throw new Error(rpcResult.error || 'Güncelleme başarısız');
+        }
+        result = rpcResult;
+      } else {
+        // 2) Yedek yol: Edge Function
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) throw new Error('Oturum bulunamadı');
+
+        const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-data`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            action: 'update_merchant_credentials',
+            merchant_id: editingMerchant.id,
+            user_id: editingMerchant.user_id,
+            email: emailChanged ? newEmail : '',
+            password: newPassword,
+          }),
+        });
+
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+          const raw = (data?.error || '').toString();
+          // Eski Edge Function sürümü bu aksiyonu tanımıyorsa açıklayıcı mesaj ver
+          if (raw.toLowerCase().includes('gecersiz istek') || raw.toLowerCase().includes('geçersiz istek')) {
+            throw new Error(
+              'Sunucu tarafı güncellemesi henüz yayınlanmadığı için bu işlem yapılamıyor. ' +
+              'Lütfen Supabase SQL Editor üzerinden "admin_merchant_credentials_rpc.sql" dosyasını çalıştırın; ' +
+              'sonrasında e-posta ve şifre güncellemesi çalışacaktır.'
+            );
+          }
+          throw new Error(raw || 'Güncelleme başarısız');
+        }
+        result = data;
       }
 
       const parts: string[] = [];
-      if (data.email_updated) parts.push('E-posta güncellendi');
-      if (data.password_updated) parts.push('Şifre güncellendi');
+      if (result?.email_updated) parts.push('E-posta güncellendi');
+      if (result?.password_updated) parts.push('Şifre güncellendi');
 
       setCredMessage({ type: 'success', text: parts.join(' • ') || 'Giriş bilgileri güncellendi' });
       setCredInfo({ email: emailChanged ? newEmail : currentEmail, last_sign_in_at: credInfo?.last_sign_in_at ?? null });
