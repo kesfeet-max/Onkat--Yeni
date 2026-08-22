@@ -261,6 +261,7 @@ export function AdminPanel() {
     if (!merchant.user_id) return;
     setLoadingCred(true);
     try {
+      // 1) Öncelikli yol: veritabanı RPC'si
       const { data: rpcData, error: rpcError } = await supabase.rpc('admin_esnaf_giris_bilgisi', {
         p_user_id: merchant.user_id,
       });
