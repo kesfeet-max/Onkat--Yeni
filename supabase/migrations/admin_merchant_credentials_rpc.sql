@@ -1,19 +1,37 @@
 -- ============================================================================
--- Admin panelinden esnaf giriş bilgilerini (e-posta / şifre) yönetme RPC'leri
+-- Admin panelinden esnaf giriş bilgilerini (e-posta / şifre) yönetme
+-- + telefon ile giriş e-posta eşlemesinin düzeltilmesi
 --
--- NEDEN: admin-data Edge Function'ının sunucudaki sürümü eski olduğunda
--- "Gecersiz istek" hatası dönüyordu. Bu migration, aynı işlemi doğrudan
--- veritabanı üzerinden (SECURITY DEFINER) yapabilen RPC'ler ekler.
--- Böylece Edge Function deploy edilmeden de admin paneli çalışır.
+-- ÇÖZÜLEN SORUNLAR
+-- 1) "Gecersiz istek": admin-data Edge Function'ının eski sürümü yeni
+--    aksiyonları tanımıyordu. Artık işlem doğrudan veritabanı RPC'si ile yapılır.
+-- 2) "Admin yetkisi yok": admins tablosundaki RLS politikası yalnızca
+--    `authenticated` rolü için tanımlıydı. SECURITY DEFINER fonksiyon farklı bir
+--    rol altında çalıştığında satırı göremiyor ve yetki kontrolü boşa düşüyordu.
+--    Aşağıda role bağımlı olmayan (PUBLIC) self-read politikası eklenir.
+-- 3) "Şifremi sıfırladım ama giriş yapamıyorum": telefon ile giriş yapılırken
+--    e-posta, uygulama tablosundaki (bazen boş/eski) email kolonundan okunuyordu.
+--    Artık her zaman auth.users'taki GERÇEK giriş e-postası döndürülür.
 --
--- GÜVENLİK: Her iki fonksiyon da çağıranın `admins` tablosunda kayıtlı
--- olmasını zorunlu kılar. Aksi halde işlem yapılmaz.
+-- Bu dosya tekrar tekrar çalıştırılabilir (idempotent).
 -- ============================================================================
 
 BEGIN;
 
--- Şifre hash'lemek için pgcrypto (Supabase'de extensions şemasında bulunur)
 CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
+
+-- ---------------------------------------------------------------------------
+-- 0) admins tablosu: role bağımsız "kendi satırını okuma" politikası
+--    (SECURITY DEFINER fonksiyonların yetki kontrolü yapabilmesi için gerekli)
+-- ---------------------------------------------------------------------------
+ALTER TABLE public.admins ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "admins_self_read_any_role" ON public.admins;
+CREATE POLICY "admins_self_read_any_role" ON public.admins
+  FOR SELECT
+  USING (auth.uid() = user_id);
+
+GRANT SELECT ON public.admins TO authenticated;
 
 -- ---------------------------------------------------------------------------
 -- 1) Esnafın gerçek giriş (auth) bilgilerini okur
@@ -25,14 +43,35 @@ SECURITY DEFINER
 SET search_path = public, auth, extensions
 AS $$
 DECLARE
-  v_email            text;
-  v_phone            text;
-  v_confirmed        timestamptz;
-  v_last_sign_in     timestamptz;
+  v_uid          uuid;
+  v_admin_id     uuid;
+  v_email        text;
+  v_phone        text;
+  v_confirmed    timestamptz;
+  v_last_sign_in timestamptz;
 BEGIN
-  -- Yetki kontrolü: yalnızca adminler
-  IF NOT EXISTS (SELECT 1 FROM public.admins a WHERE a.user_id = auth.uid()) THEN
-    RETURN json_build_object('success', false, 'error', 'Admin yetkisi yok');
+  v_uid := auth.uid();
+
+  IF v_uid IS NULL THEN
+    RETURN json_build_object('success', false, 'error', 'Oturum bulunamadı, lütfen tekrar giriş yapın');
+  END IF;
+
+  SELECT a.id INTO v_admin_id
+  FROM public.admins a
+  WHERE a.user_id = v_uid
+  LIMIT 1;
+
+  -- Yedek eşleme: admins kaydında user_id boş bırakılmışsa e-posta ile eşleştir
+  IF v_admin_id IS NULL THEN
+    SELECT a.id INTO v_admin_id
+    FROM public.admins a
+    JOIN auth.users u ON LOWER(u.email) = LOWER(a.email)
+    WHERE u.id = v_uid
+    LIMIT 1;
+  END IF;
+
+  IF v_admin_id IS NULL THEN
+    RETURN json_build_object('success', false, 'error', 'Bu hesap yönetici olarak kayıtlı değil');
   END IF;
 
   IF p_user_id IS NULL THEN
@@ -60,7 +99,6 @@ $$;
 
 -- ---------------------------------------------------------------------------
 -- 2) Esnafın giriş e-postasını ve/veya şifresini günceller
---    Şifre bcrypt ile hashlenerek auth.users'a yazılır.
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.admin_esnaf_giris_guncelle(
   p_user_id     uuid,
@@ -74,6 +112,7 @@ SECURITY DEFINER
 SET search_path = public, auth, extensions
 AS $$
 DECLARE
+  v_uid            uuid;
   v_admin_id       uuid;
   v_admin_email    text;
   v_new_email      text;
@@ -82,14 +121,37 @@ DECLARE
   v_pass_updated   boolean := false;
   v_action         text;
 BEGIN
-  -- Yetki kontrolü: yalnızca adminler
+  v_uid := auth.uid();
+
+  IF v_uid IS NULL THEN
+    RETURN json_build_object('success', false, 'error', 'Oturum bulunamadı, lütfen tekrar giriş yapın');
+  END IF;
+
   SELECT a.id, a.email INTO v_admin_id, v_admin_email
   FROM public.admins a
-  WHERE a.user_id = auth.uid()
+  WHERE a.user_id = v_uid
   LIMIT 1;
 
+  -- Yedek eşleme: admins kaydında user_id boş bırakılmışsa e-posta ile eşleştir
   IF v_admin_id IS NULL THEN
-    RETURN json_build_object('success', false, 'error', 'Admin yetkisi yok');
+    SELECT a.id, a.email INTO v_admin_id, v_admin_email
+    FROM public.admins a
+    JOIN auth.users u ON LOWER(u.email) = LOWER(a.email)
+    WHERE u.id = v_uid
+    LIMIT 1;
+
+    -- user_id alanını da doldur ki sonraki kontroller doğrudan çalışsın
+    IF v_admin_id IS NOT NULL THEN
+      BEGIN
+        UPDATE public.admins SET user_id = v_uid WHERE id = v_admin_id AND user_id IS NULL;
+      EXCEPTION WHEN OTHERS THEN
+        NULL;
+      END;
+    END IF;
+  END IF;
+
+  IF v_admin_id IS NULL THEN
+    RETURN json_build_object('success', false, 'error', 'Bu hesap yönetici olarak kayıtlı değil');
   END IF;
 
   IF p_user_id IS NULL THEN
@@ -107,7 +169,7 @@ BEGIN
     RETURN json_build_object('success', false, 'error', 'Güncellenecek bilgi girilmedi');
   END IF;
 
-  -- E-posta doğrulama ve güncelleme
+  -- ---- E-posta güncelleme ----
   IF v_new_email IS NOT NULL THEN
     IF v_new_email !~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]{2,}$' THEN
       RETURN json_build_object('success', false, 'error', 'Geçerli bir e-posta adresi girin');
@@ -124,18 +186,33 @@ BEGIN
     END IF;
 
     UPDATE auth.users
-       SET email                = v_new_email,
-           email_confirmed_at   = COALESCE(email_confirmed_at, NOW()),
-           email_change         = '',
+       SET email                      = v_new_email,
+           email_confirmed_at         = COALESCE(email_confirmed_at, NOW()),
+           email_change               = '',
            email_change_token_new     = '',
            email_change_token_current = '',
-           updated_at           = NOW()
+           updated_at                 = NOW()
      WHERE id = p_user_id;
+
+    -- GoTrue kimlik kaydındaki e-postayı da senkronize et
+    BEGIN
+      UPDATE auth.identities
+         SET identity_data = jsonb_set(
+               COALESCE(identity_data, '{}'::jsonb),
+               '{email}',
+               to_jsonb(v_new_email),
+               true
+             ),
+             updated_at = NOW()
+       WHERE user_id = p_user_id AND provider = 'email';
+    EXCEPTION WHEN OTHERS THEN
+      NULL;
+    END;
 
     v_email_updated := true;
   END IF;
 
-  -- Şifre doğrulama ve güncelleme (bcrypt hash)
+  -- ---- Şifre güncelleme (bcrypt hash) ----
   IF v_new_password IS NOT NULL THEN
     IF LENGTH(v_new_password) < 6 THEN
       RETURN json_build_object('success', false, 'error', 'Şifre en az 6 karakter olmalıdır');
@@ -151,7 +228,7 @@ BEGIN
     v_pass_updated := true;
   END IF;
 
-  -- Uygulama tablolarındaki e-posta kaydını senkronize et (kolon yoksa sessiz geç)
+  -- ---- Uygulama tablolarını senkronize et ----
   IF v_email_updated THEN
     BEGIN
       IF p_merchant_id IS NOT NULL THEN
@@ -174,7 +251,7 @@ BEGIN
     END;
   END IF;
 
-  -- İşlem kaydı (tablo yoksa sessizce geçilir)
+  -- ---- İşlem kaydı ----
   v_action := CASE
     WHEN v_email_updated AND v_pass_updated THEN 'merchant_email_password_update'
     WHEN v_pass_updated THEN 'merchant_password_reset'
@@ -197,10 +274,77 @@ BEGIN
 END;
 $$;
 
--- Yalnızca oturum açmış kullanıcılar çağırabilir; içeride admin kontrolü yapılır
+-- ---------------------------------------------------------------------------
+-- 3) Telefon -> GERÇEK giriş e-postası eşlemesi
+--    Önceki sürüm uygulama tablosundaki `email` kolonunu döndürüyordu; bu kolon
+--    boş veya eski olduğunda giriş `telefon@onkati.local` adresini deniyor ve
+--    yeni belirlenen şifreyle giriş yapılamıyordu.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.get_email_by_phone(p_phone TEXT)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+DECLARE
+  v_clean      text;
+  v_user_id    uuid;
+  v_email      text;
+  v_auth_email text;
+BEGIN
+  v_clean := regexp_replace(COALESCE(p_phone, ''), '[^0-9]', '', 'g');
+
+  IF v_clean = '' THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Telefon numarasi gerekli');
+  END IF;
+
+  -- Müşteri kaydı
+  SELECT c.user_id, c.email INTO v_user_id, v_email
+  FROM public.customers c
+  WHERE regexp_replace(COALESCE(c.phone, ''), '[^0-9]', '', 'g') = v_clean
+  LIMIT 1;
+
+  -- Esnaf kaydı
+  IF v_user_id IS NULL THEN
+    SELECT m.user_id, m.email INTO v_user_id, v_email
+    FROM public.merchants m
+    WHERE regexp_replace(COALESCE(m.phone, ''), '[^0-9]', '', 'g') = v_clean
+    LIMIT 1;
+  END IF;
+
+  -- Her zaman auth.users'taki gerçek giriş e-postasını tercih et
+  IF v_user_id IS NOT NULL THEN
+    SELECT u.email INTO v_auth_email FROM auth.users u WHERE u.id = v_user_id;
+    IF v_auth_email IS NOT NULL AND v_auth_email <> '' THEN
+      v_email := v_auth_email;
+    END IF;
+  END IF;
+
+  -- Uygulama tablolarında bulunamadıysa auth metadata üzerinden dene
+  IF v_email IS NULL OR v_email = '' THEN
+    SELECT u.email INTO v_email
+    FROM auth.users u
+    WHERE regexp_replace(COALESCE(u.raw_user_meta_data->>'phone', ''), '[^0-9]', '', 'g') = v_clean
+    LIMIT 1;
+  END IF;
+
+  IF v_email IS NULL OR v_email = '' THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Kullanici bulunamadi');
+  END IF;
+
+  RETURN jsonb_build_object('success', true, 'email', v_email);
+END;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- İzinler
+-- ---------------------------------------------------------------------------
 REVOKE ALL ON FUNCTION public.admin_esnaf_giris_bilgisi(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.admin_esnaf_giris_guncelle(uuid, uuid, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.admin_esnaf_giris_bilgisi(uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.admin_esnaf_giris_guncelle(uuid, uuid, text, text) TO authenticated;
+
+GRANT EXECUTE ON FUNCTION public.get_email_by_phone(TEXT) TO anon;
+GRANT EXECUTE ON FUNCTION public.get_email_by_phone(TEXT) TO authenticated;
 
 COMMIT;

@@ -24,13 +24,30 @@ async function verifyAdmin(req: Request, supabase: any): Promise<{ userId: strin
     .from('admins')
     .select('*')
     .eq('user_id', user.id)
-    .single();
+    .maybeSingle();
 
-  if (!adminData) {
-    return { userId: user.id, admin: null, error: 'Admin yetkisi yok' };
+  if (adminData) {
+    return { userId: user.id, admin: adminData };
   }
 
-  return { userId: user.id, admin: adminData };
+  // Yedek eslesme: admins kaydinda user_id bos birakilmis olabilir.
+  // Bu durumda giris e-postasi uzerinden eslestirilir ve user_id doldurulur.
+  if (user.email) {
+    const { data: byEmail } = await supabase
+      .from('admins')
+      .select('*')
+      .ilike('email', user.email)
+      .maybeSingle();
+
+    if (byEmail) {
+      if (!byEmail.user_id) {
+        await supabase.from('admins').update({ user_id: user.id }).eq('id', byEmail.id);
+      }
+      return { userId: user.id, admin: byEmail };
+    }
+  }
+
+  return { userId: user.id, admin: null, error: 'Admin yetkisi yok' };
 }
 
 Deno.serve(async (req: Request) => {

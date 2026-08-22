@@ -365,9 +365,16 @@ export function AdminPanel() {
 
       const rpcResult = rpcData as any;
 
-      if (!rpcError && rpcResult) {
+      // RPC'nin yetki/oturum kaynaklı reddi, iş kuralı hatasından ayrılır:
+      // yetki hatasında Edge Function yolu denenir, iş kuralı hatası
+      // doğrudan kullanıcıya gösterilir.
+      const rpcAuthBlocked =
+        !!rpcError ||
+        (rpcResult && !rpcResult.success &&
+          /yönetici|yonetici|yetki|oturum/i.test(String(rpcResult.error || '')));
+
+      if (!rpcAuthBlocked && rpcResult) {
         if (!rpcResult.success) {
-          // RPC çalıştı ama iş kuralı hatası döndü — doğrudan kullanıcıya göster
           throw new Error(rpcResult.error || 'Güncelleme başarısız');
         }
         result = rpcResult;
@@ -395,11 +402,19 @@ export function AdminPanel() {
         if (!response.ok || !data.success) {
           const raw = (data?.error || '').toString();
           // Eski Edge Function sürümü bu aksiyonu tanımıyorsa açıklayıcı mesaj ver
-          if (raw.toLowerCase().includes('gecersiz istek') || raw.toLowerCase().includes('geçersiz istek')) {
+          const lower = raw.toLowerCase();
+          if (lower.includes('gecersiz istek') || lower.includes('geçersiz istek')) {
             throw new Error(
               'Sunucu tarafı güncellemesi henüz yayınlanmadığı için bu işlem yapılamıyor. ' +
-              'Lütfen Supabase SQL Editor üzerinden "admin_merchant_credentials_rpc.sql" dosyasını çalıştırın; ' +
+              'Lütfen Supabase SQL Editor üzerinden yeni veritabanı betiğini (admin_merchant_credentials_rpc) bir kez çalıştırın; ' +
               'sonrasında e-posta ve şifre güncellemesi çalışacaktır.'
+            );
+          }
+          if (lower.includes('admin yetkisi yok') || lower.includes('yönetici')) {
+            throw new Error(
+              'Yönetici doğrulaması yapılamadı. Bunun nedeni genellikle yeni veritabanı betiğinin ' +
+              '(admin_merchant_credentials_rpc) henüz çalıştırılmamış olmasıdır. ' +
+              'Betiği Supabase SQL Editor üzerinden bir kez çalıştırıp tekrar deneyin.'
             );
           }
           throw new Error(raw || 'Güncelleme başarısız');

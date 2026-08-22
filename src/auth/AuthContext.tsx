@@ -293,29 +293,49 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const cleanedPhone = phone.replace(/\D/g, '');
 
-      // RPC ile email bul
-      let email: string | null = null;
+      // RPC ile gerçek giriş e-postasını bul
+      let mappedEmail: string | null = null;
       try {
         const { data: rpcResult, error: rpcError } = await supabase.rpc('get_email_by_phone', {
           p_phone: cleanedPhone,
         });
         if (!rpcError && rpcResult?.success) {
-          email = rpcResult.email;
+          mappedEmail = rpcResult.email;
         }
       } catch {
-        // RPC yoksa fallback
+        // RPC yoksa aşağıdaki yedek adres denenir
       }
 
-      if (!email) {
-        email = `${cleanedPhone}@onkati.local`;
+      /**
+       * Aday e-posta adresleri sırayla denenir.
+       *
+       * Neden: Şifre sıfırlama gerçek auth e-postası (örn. kisi@gmail.com)
+       * üzerinden yapılır. Eşleme tek bir adrese bağlı kalırsa, tablodaki
+       * e-posta boş/eski olduğunda giriş yanlış adresi dener ve yeni şifre
+       * çalışmıyormuş gibi görünür. Bu yüzden hem eşlenen adres hem de
+       * varsayılan yerel adres denenir.
+       */
+      const candidateEmails = Array.from(
+        new Set([mappedEmail, `${cleanedPhone}@onkati.local`].filter(Boolean) as string[])
+      );
+
+      let data: Awaited<ReturnType<typeof supabase.auth.signInWithPassword>>['data'] | null = null;
+      let lastFailed = true;
+
+      for (const candidate of candidateEmails) {
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+          email: candidate,
+          password,
+        });
+
+        if (!signInError && signInData?.user) {
+          data = signInData;
+          lastFailed = false;
+          break;
+        }
       }
 
-      const { data, error: signInError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-      if (signInError) {
+      if (lastFailed || !data) {
         setLoading(false);
         return { error: 'Geçersiz telefon numarası veya şifre' };
       }
