@@ -51,6 +51,7 @@ import { withRetry, resilientRpc, resilientQuery } from '../lib/retry';
 import { toast } from '../lib/toast';
 import { triggerCampaignNotification } from '../lib/push-notifications';
 import { SubscriptionTab } from '../components/SubscriptionTab';
+import { BrandLogo } from '../components/BrandLogo';
 import { resolveMerchantSubscription, buildStoreCode } from '../lib/subscription';
 
 type MerchantTab = 'islem' | 'musteriler' | 'gecmis' | 'abonelik' | 'profilim';
