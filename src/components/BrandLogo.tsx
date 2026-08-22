@@ -18,9 +18,9 @@ type LogoSize = 'sm' | 'md' | 'lg';
  * - lg (giriş, kayıt, ana sayfa, alt bilgi): mobil 80px / masaüstü 112px
  */
 const SIZE_CLASSES: Record<LogoSize, string> = {
-  sm: 'h-12 md:h-16 -my-1.5',
-  md: 'h-16 md:h-20 -my-2',
-  lg: 'h-20 md:h-28 -my-3',
+  sm: 'h-10 sm:h-12 md:h-16 -my-1 md:-my-1.5',
+  md: 'h-12 sm:h-16 md:h-20 -my-1.5 md:-my-2',
+  lg: 'h-14 sm:h-20 md:h-28 -my-2 md:-my-3',
 };
 
 interface BrandLogoProps {
