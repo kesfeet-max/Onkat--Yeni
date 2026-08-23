@@ -10,17 +10,18 @@ const LOGO_SRC =
 type LogoSize = 'sm' | 'md' | 'lg';
 
 /**
- * Responsive yükseklikler (yatay logo, genişlik otomatik).
+ * Responsive yükseklikler (yatay logo, genişlik otomatik — görsel oranı 3:2).
  * Görselin kendi iç boşluğu olduğu için kutu yüksekliği bilinçli olarak yüksek tutulur;
  * negatif dikey marj ile fazladan boşluk layout'u bozmaz.
- * - sm (panel üst barı, yanında başlık metni var): mobil 48px / masaüstü 64px
- * - md: mobil 64px / masaüstü 80px
- * - lg (giriş, kayıt, ana sayfa, alt bilgi): mobil 80px / masaüstü 112px
+ * - sm (panel üst barı, yanında başlık metni var): mobil 56px / masaüstü 64px
+ * - md: mobil 72px / masaüstü 80px
+ * - lg (giriş, kayıt, ana sayfa, alt bilgi): mobil 96px / masaüstü 112px
+ *   Mobilde logo ilk dikkat çeken unsur olsun diye önceki 56px'in yaklaşık iki katı.
  */
 const SIZE_CLASSES: Record<LogoSize, string> = {
-  sm: 'h-10 sm:h-12 md:h-16 -my-1 md:-my-1.5',
-  md: 'h-12 sm:h-16 md:h-20 -my-1.5 md:-my-2',
-  lg: 'h-14 sm:h-20 md:h-28 -my-2 md:-my-3',
+  sm: 'h-14 sm:h-16 md:h-16 -my-1.5 md:-my-2',
+  md: 'h-[4.5rem] sm:h-20 md:h-20 -my-2 md:-my-2.5',
+  lg: 'h-24 sm:h-24 md:h-28 -my-2.5 md:-my-3',
 };
 
 interface BrandLogoProps {
@@ -39,7 +40,7 @@ export function BrandLogo({ to = '/', size = 'md', framed = false, className = '
       alt="Onkatı Esnaf Sadakat Sistemi"
       className={[
         SIZE_CLASSES[size],
-        'w-auto max-w-[85vw] object-contain select-none drop-shadow-[0_2px_6px_rgba(0,0,0,0.35)]',
+        'w-auto max-w-[52vw] sm:max-w-[60vw] object-contain select-none drop-shadow-[0_2px_6px_rgba(0,0,0,0.35)]',
         framed ? 'rounded-lg ring-1 ring-white/10 px-2' : '',
         className,
       ]

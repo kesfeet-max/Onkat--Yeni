@@ -75,7 +75,7 @@ function Navbar() {
   return (
     <nav className="bg-primary-600 shadow-lg sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center gap-2 h-14 sm:h-20 md:h-24">
+        <div className="flex justify-between items-center gap-2 h-20 sm:h-20 md:h-24">
           <BrandLogo to="/" size="lg" />
           <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
             <Link
@@ -99,32 +99,32 @@ function Navbar() {
 
 function Hero() {
   return (
-    <section className="bg-gradient-to-br from-primary-600 via-primary-700 to-primary-800 text-white py-12 sm:py-16 lg:py-24">
+    <section className="bg-gradient-to-br from-primary-600 via-primary-700 to-primary-800 text-white py-6 sm:py-12 lg:py-24">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 items-center">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 sm:gap-8 lg:gap-12 items-center">
           <div>
-            <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-heading font-bold leading-tight mb-3 sm:mb-6">
+            <h1 className="text-2xl sm:text-4xl md:text-5xl lg:text-6xl font-heading font-bold leading-tight mb-2 sm:mb-5">
               Birlikte
               <span className="text-secondary-400"> Güçlenelim</span>
             </h1>
-            <p className="text-sm sm:text-lg md:text-xl text-primary-100 mb-5 sm:mb-8 leading-relaxed">
+            <p className="text-[13px] sm:text-lg md:text-xl text-primary-100 mb-4 sm:mb-8 leading-relaxed">
               Mahalle kültürüyle buluşan yepyeni bir sadakat sistemi.
               Her alışverişte <span className="text-secondary-300 font-semibold">%25'e varan puanlar kazan</span>,
               esnafımızla birlikte büyü.
             </p>
-            <div className="flex flex-wrap gap-3 sm:gap-4">
+            <div className="grid grid-cols-2 gap-2.5 sm:flex sm:flex-wrap sm:gap-4">
               <Link
                 to="/kayit?role=customer"
-                className="bg-secondary-500 text-primary-900 px-5 py-3 text-base sm:px-8 sm:py-4 sm:text-lg rounded-xl font-bold hover:bg-secondary-400 transition-all shadow-xl flex items-center gap-2"
+                className="bg-secondary-500 text-primary-900 w-full justify-center px-3 py-2.5 text-sm sm:w-auto sm:px-8 sm:py-4 sm:text-lg rounded-xl font-bold hover:bg-secondary-400 transition-all shadow-xl flex items-center gap-1.5 sm:gap-2 whitespace-nowrap"
               >
-                <Wallet className="w-5 h-5" />
+                <Wallet className="h-4 w-4 sm:h-5 sm:w-5 shrink-0" />
                 Müşteri Ol
               </Link>
               <Link
                 to="/kayit?role=merchant"
-                className="bg-white text-primary-700 px-5 py-3 text-base sm:px-8 sm:py-4 sm:text-lg rounded-xl font-bold hover:bg-gray-100 transition-all shadow-xl flex items-center gap-2"
+                className="bg-white text-primary-700 w-full justify-center px-3 py-2.5 text-sm sm:w-auto sm:px-8 sm:py-4 sm:text-lg rounded-xl font-bold hover:bg-gray-100 transition-all shadow-xl flex items-center gap-1.5 sm:gap-2 whitespace-nowrap"
               >
-                <Store className="w-5 h-5" />
+                <Store className="h-4 w-4 sm:h-5 sm:w-5 shrink-0" />
                 Esnaf Ol
               </Link>
             </div>
@@ -133,24 +133,24 @@ function Hero() {
           <div className="flex justify-center">
             <div className="relative w-full max-w-xl">
               <div className="absolute -inset-6 bg-secondary-400/20 blur-3xl rounded-full"></div>
-              <div className="relative grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+              <div className="relative grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-4">
                 {HERO_HIGHLIGHTS.map(({ icon: Icon, title, description }) => (
                   <div
                     key={title}
-                    className="group relative overflow-hidden rounded-2xl border border-white/20 bg-white/10 p-4 sm:p-5 backdrop-blur-md transition-all duration-300 hover:-translate-y-1 hover:border-secondary-400/60 hover:bg-white/[0.16] hover:shadow-[0_22px_45px_-18px_rgba(0,0,0,0.6)]"
+                    className="group relative overflow-hidden rounded-2xl border border-white/20 bg-white/10 p-3 sm:p-5 backdrop-blur-md transition-all duration-300 hover:-translate-y-1 hover:border-secondary-400/60 hover:bg-white/[0.16] hover:shadow-[0_22px_45px_-18px_rgba(0,0,0,0.6)]"
                   >
                     {/* Köşedeki altın ışıma */}
                     <div className="pointer-events-none absolute -right-8 -top-8 h-24 w-24 rounded-full bg-secondary-400/25 blur-2xl opacity-70 transition-opacity duration-300 group-hover:opacity-100"></div>
 
-                    <div className="relative flex items-start gap-3 sm:gap-3.5">
-                      <div className="flex h-9 w-9 sm:h-11 sm:w-11 shrink-0 items-center justify-center rounded-xl border border-secondary-400/40 bg-secondary-400/15 text-secondary-300 transition-transform duration-300 group-hover:scale-110">
+                    <div className="relative flex items-center gap-2.5 sm:items-start sm:gap-3.5">
+                      <div className="flex h-8 w-8 sm:h-11 sm:w-11 shrink-0 items-center justify-center rounded-lg sm:rounded-xl border border-secondary-400/40 bg-secondary-400/15 text-secondary-300 transition-transform duration-300 group-hover:scale-110">
                         <Icon className="h-4 w-4 sm:h-5 sm:w-5" />
                       </div>
                       <div className="min-w-0">
-                        <p className="font-heading text-base sm:text-lg font-bold leading-snug text-white">
+                        <p className="font-heading text-sm sm:text-lg font-bold leading-snug text-white">
                           {title}
                         </p>
-                        <p className="mt-0.5 sm:mt-1 text-xs sm:text-sm leading-relaxed text-primary-100">
+                        <p className="mt-0 sm:mt-1 text-[11px] sm:text-sm leading-snug sm:leading-relaxed text-primary-100">
                           {description}
                         </p>
                       </div>
@@ -271,7 +271,7 @@ function BenefitCard({ eyebrow, eyebrowIcon: EyebrowIcon, title, benefits, varia
 
   return (
     <div
-      className={`group relative overflow-hidden rounded-3xl border-2 bg-white p-4 shadow-lg transition-all duration-300 hover:-translate-y-1 hover:shadow-2xl sm:p-7 lg:p-9 ${styles.card}`}
+      className={`group relative overflow-hidden rounded-2xl border-2 bg-white p-3.5 shadow-lg transition-all duration-300 hover:-translate-y-1 hover:shadow-2xl sm:rounded-3xl sm:p-7 lg:p-9 ${styles.card}`}
     >
       <div
         className={`pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-gradient-to-br to-transparent blur-2xl ${styles.glow}`}
@@ -285,26 +285,26 @@ function BenefitCard({ eyebrow, eyebrowIcon: EyebrowIcon, title, benefits, varia
           {eyebrow}
         </span>
 
-        <h3 className={`mt-3 font-heading text-xl font-bold leading-snug sm:mt-5 sm:text-2xl lg:text-3xl ${styles.title}`}>
+        <h3 className={`mt-2.5 font-heading text-base font-bold leading-snug sm:mt-5 sm:text-2xl lg:text-3xl ${styles.title}`}>
           {title}
         </h3>
 
-        <div className={`mt-3 h-1 w-12 rounded-full sm:mt-5 sm:w-16 ${styles.rule}`} />
+        <div className={`mt-2.5 h-1 w-10 rounded-full sm:mt-5 sm:w-16 ${styles.rule}`} />
 
-        <ul className="mt-4 space-y-4 sm:mt-7 sm:space-y-6">
+        <ul className="mt-3 space-y-3 sm:mt-7 sm:space-y-6">
           {benefits.map((benefit) => {
             const BenefitIcon = benefit.icon;
 
             return (
-              <li key={benefit.label} className="group/item flex gap-3 sm:gap-4">
+              <li key={benefit.label} className="group/item flex gap-2.5 sm:gap-4">
                 <span
-                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-colors duration-300 sm:h-12 sm:w-12 sm:rounded-2xl ${styles.iconBox}`}
+                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors duration-300 sm:h-12 sm:w-12 sm:rounded-2xl ${styles.iconBox}`}
                 >
                   <BenefitIcon className="h-4 w-4 sm:h-6 sm:w-6" />
                 </span>
                 <div className="min-w-0">
-                  <p className="font-heading text-sm font-bold text-gray-900 sm:text-lg">{benefit.label}</p>
-                  <p className="mt-0.5 text-xs leading-relaxed text-gray-600 sm:mt-1 sm:text-base">{benefit.text}</p>
+                  <p className="font-heading text-[13px] font-bold text-gray-900 sm:text-lg">{benefit.label}</p>
+                  <p className="mt-0.5 text-[11px] leading-snug text-gray-600 sm:mt-1 sm:text-base sm:leading-relaxed">{benefit.text}</p>
                 </div>
               </li>
             );
@@ -321,24 +321,24 @@ function BenefitCard({ eyebrow, eyebrowIcon: EyebrowIcon, title, benefits, varia
  */
 function WhyOnkatiSection() {
   return (
-    <section className="bg-white py-10 sm:py-14 lg:py-20">
+    <section className="bg-white py-6 sm:py-12 lg:py-20">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="mb-6 text-center sm:mb-10 lg:mb-14">
+        <div className="mb-4 text-center sm:mb-9 lg:mb-14">
           <span className="inline-flex items-center gap-2 rounded-full bg-primary-50 px-3 py-1 text-xs font-semibold text-primary-700 ring-1 ring-primary-100 sm:px-4 sm:py-1.5 sm:text-sm">
             <Sparkles className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
             Avantajlar ve Çözümler
           </span>
-          <h2 className="mt-3 font-heading text-2xl font-bold text-primary-700 sm:mt-5 sm:text-3xl md:text-4xl">
+          <h2 className="mt-2 font-heading text-xl font-bold text-primary-700 sm:mt-5 sm:text-3xl md:text-4xl">
             Neden Onkatı?
           </h2>
-          <p className="mx-auto mt-2.5 max-w-2xl text-sm text-gray-600 sm:mt-4 sm:text-base">
+          <p className="mx-auto mt-2 max-w-2xl text-[13px] leading-snug text-gray-600 sm:mt-4 sm:text-base sm:leading-relaxed">
             Onkatı tek taraflı bir kampanya değil; esnafın kazancını korurken müşterinin bütçesini rahatlatan
             karşılıklı bir kazanç bağıdır.
           </p>
-          <div className="mx-auto mt-3 h-1 w-16 rounded-full bg-secondary-500 sm:mt-4 sm:w-24" />
+          <div className="mx-auto mt-2.5 h-1 w-14 rounded-full bg-secondary-500 sm:mt-4 sm:w-24" />
         </div>
 
-        <div className="grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-2 lg:gap-8">
+        <div className="grid grid-cols-1 gap-3 sm:gap-6 lg:grid-cols-2 lg:gap-8">
           <BenefitCard
             eyebrow="Esnaflar İçin Neden Onkatı?"
             eyebrowIcon={Megaphone}
@@ -361,31 +361,31 @@ function WhyOnkatiSection() {
 
 function AboutSection() {
   return (
-    <section className="py-10 sm:py-14 lg:py-20 bg-gray-50">
+    <section className="py-6 sm:py-12 lg:py-20 bg-gray-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-6 sm:mb-10 lg:mb-16">
-          <h2 className="text-2xl sm:text-3xl md:text-4xl font-heading font-bold text-primary-700 mb-3 sm:mb-4">
+        <div className="text-center mb-4 sm:mb-9 lg:mb-16">
+          <h2 className="text-xl sm:text-3xl md:text-4xl font-heading font-bold text-primary-700 mb-2.5 sm:mb-4 leading-snug">
             Mahalle Kültürü, Modern Sadakatle Buluşuyor
           </h2>
-          <div className="w-16 sm:w-24 h-1 bg-secondary-500 mx-auto rounded-full"></div>
+          <div className="w-14 sm:w-24 h-1 bg-secondary-500 mx-auto rounded-full"></div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-12 items-center">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 lg:gap-12 items-center">
           <div>
-            <p className="text-sm sm:text-base lg:text-lg text-gray-700 leading-relaxed mb-4 sm:mb-6">
+            <p className="text-[13px] sm:text-base lg:text-lg text-gray-700 leading-relaxed mb-3 sm:mb-6">
               <span className="text-secondary-600 font-semibold">'Damla damla göl olur'</span> vizyonuyla;
               kurumsal devlerin kasalarını dolduran sistemlere karşı, mahalle esnafını ve komşularımızı
               birbirine bağlayan <span className="font-semibold text-primary-600">yerel bir dayanışma hareketi</span> kurduk.
             </p>
-            <p className="text-sm sm:text-base lg:text-lg text-gray-700 leading-relaxed mb-4 sm:mb-6">
+            <p className="text-[13px] sm:text-base lg:text-lg text-gray-700 leading-relaxed mb-3 sm:mb-6">
               Müşterilerimiz alışveriş yaptıkça biriken puanlarla bütçesini korurken, esnafımız
               komisyonsuz ve sadık bir müşteri ağı kazanır.
             </p>
-            <div className="mt-4 sm:mt-8 flex flex-wrap gap-2 sm:gap-3">
+            <div className="mt-3 sm:mt-8 flex flex-wrap gap-1.5 sm:gap-3">
               {ABOUT_FEATURES.map((feature) => (
                 <span
                   key={feature}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-primary-100 bg-white px-3 py-1.5 text-xs sm:gap-2 sm:px-4 sm:py-2 sm:text-sm font-medium text-primary-700 shadow-sm"
+                  className="inline-flex items-center gap-1 rounded-full border border-primary-100 bg-white px-2.5 py-1 text-[11px] sm:gap-2 sm:px-4 sm:py-2 sm:text-sm font-medium text-primary-700 shadow-sm"
                 >
                   <CheckCircle2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-secondary-500" />
                   {feature}
@@ -394,20 +394,20 @@ function AboutSection() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-6">
             {ABOUT_CARDS.map(({ icon: Icon, title, description }) => (
               <div
                 key={title}
-                className="group relative overflow-hidden rounded-2xl border border-gray-100 bg-white p-4 sm:p-6 shadow-lg transition-all duration-300 hover:-translate-y-1 hover:border-secondary-200 hover:shadow-2xl"
+                className="group relative overflow-hidden rounded-2xl border border-gray-100 bg-white p-3.5 sm:p-6 shadow-lg transition-all duration-300 hover:-translate-y-1 hover:border-secondary-200 hover:shadow-2xl"
               >
                 <div className="pointer-events-none absolute -right-10 -top-10 h-24 w-24 rounded-full bg-secondary-200/50 blur-2xl opacity-0 transition-opacity duration-300 group-hover:opacity-100"></div>
-                <div className="relative mb-2.5 sm:mb-4 flex h-9 w-9 sm:h-12 sm:w-12 items-center justify-center rounded-xl bg-gradient-to-br from-primary-600 to-primary-800 text-white shadow-md transition-transform duration-300 group-hover:scale-110">
+                <div className="relative mb-2 sm:mb-4 flex h-8 w-8 sm:h-12 sm:w-12 items-center justify-center rounded-lg sm:rounded-xl bg-gradient-to-br from-primary-600 to-primary-800 text-white shadow-md transition-transform duration-300 group-hover:scale-110">
                   <Icon className="h-4 w-4 sm:h-6 sm:w-6" />
                 </div>
-                <h3 className="relative mb-1 sm:mb-2 font-heading text-base sm:text-lg font-semibold text-gray-900">
+                <h3 className="relative mb-0.5 sm:mb-2 font-heading text-sm sm:text-lg font-semibold text-gray-900">
                   {title}
                 </h3>
-                <p className="relative text-xs sm:text-sm leading-relaxed text-gray-600">
+                <p className="relative text-[11px] leading-snug sm:text-sm sm:leading-relaxed text-gray-600">
                   {description}
                 </p>
               </div>
@@ -505,13 +505,13 @@ function FlowColumn({ title, headerIcon: HeaderIcon, steps, variant }: FlowColum
   const lineClass = isCustomer ? 'bg-primary-200' : 'bg-secondary-200';
 
   return (
-    <div className={`rounded-2xl border p-4 sm:p-6 lg:p-8 shadow-sm ${cardClass}`}>
-      <h3 className={`mb-4 flex items-center gap-2.5 font-heading text-lg font-bold sm:mb-8 sm:gap-3 sm:text-2xl ${titleClass}`}>
+    <div className={`rounded-2xl border p-3.5 sm:p-6 lg:p-8 shadow-sm ${cardClass}`}>
+      <h3 className={`mb-3 flex items-center gap-2 font-heading text-base font-bold sm:mb-8 sm:gap-3 sm:text-2xl ${titleClass}`}>
         <HeaderIcon className="h-5 w-5 sm:h-7 sm:w-7" />
         {title}
       </h3>
 
-      <ol className="space-y-4 sm:space-y-6">
+      <ol className="space-y-3 sm:space-y-6">
         {steps.map(({ icon: Icon, title: stepTitle, description }, index) => (
           <li key={stepTitle} className="relative flex gap-3 sm:gap-4">
             {/* Adımları birbirine bağlayan dikey çizgi */}
@@ -534,8 +534,8 @@ function FlowColumn({ title, headerIcon: HeaderIcon, steps, variant }: FlowColum
             </div>
 
             <div className="min-w-0 pt-0.5 sm:pt-1">
-              <p className="font-heading text-sm font-semibold text-gray-900 sm:text-base">{stepTitle}</p>
-              <p className="mt-0.5 text-xs leading-relaxed text-gray-600 sm:mt-1 sm:text-sm">{description}</p>
+              <p className="font-heading text-[13px] font-semibold text-gray-900 sm:text-base">{stepTitle}</p>
+              <p className="mt-0.5 text-[11px] leading-snug text-gray-600 sm:mt-1 sm:text-sm sm:leading-relaxed">{description}</p>
             </div>
           </li>
         ))}
@@ -546,19 +546,19 @@ function FlowColumn({ title, headerIcon: HeaderIcon, steps, variant }: FlowColum
 
 function HowItWorksSection() {
   return (
-    <section className="py-10 sm:py-14 lg:py-20 bg-white">
+    <section className="py-6 sm:py-12 lg:py-20 bg-white">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-6 sm:mb-10 lg:mb-16">
-          <h2 className="text-2xl sm:text-3xl md:text-4xl font-heading font-bold text-primary-700 mb-2.5 sm:mb-4">
+        <div className="text-center mb-4 sm:mb-9 lg:mb-16">
+          <h2 className="text-xl sm:text-3xl md:text-4xl font-heading font-bold text-primary-700 mb-2 sm:mb-4">
             Nasıl Çalışır?
           </h2>
-          <p className="mx-auto max-w-2xl text-sm text-gray-600 sm:text-base">
+          <p className="mx-auto max-w-2xl text-[13px] leading-snug text-gray-600 sm:text-base sm:leading-relaxed">
             Kasada tek hareketle tamamlanan, cihaz gerektirmeyen basit bir akış.
           </p>
-          <div className="w-16 sm:w-24 h-1 bg-secondary-500 mx-auto rounded-full mt-3 sm:mt-4"></div>
+          <div className="w-14 sm:w-24 h-1 bg-secondary-500 mx-auto rounded-full mt-2.5 sm:mt-4"></div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 lg:gap-12">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-6 lg:gap-12">
           <FlowColumn
             title="Müşteriler İçin"
             headerIcon={Wallet}
@@ -613,17 +613,17 @@ function FAQSection() {
   const [openIndex, setOpenIndex] = useState<number | null>(0);
 
   return (
-    <section className="py-10 sm:py-14 lg:py-20 bg-gray-50">
+    <section className="py-6 sm:py-12 lg:py-20 bg-gray-50">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-6 sm:mb-10 lg:mb-16">
-          <h2 className="text-2xl sm:text-3xl md:text-4xl font-heading font-bold text-primary-700 mb-2.5 sm:mb-4">
+        <div className="text-center mb-4 sm:mb-9 lg:mb-16">
+          <h2 className="text-xl sm:text-3xl md:text-4xl font-heading font-bold text-primary-700 mb-2 sm:mb-4">
             Sıkça Sorulan Sorular
           </h2>
-          <p className="text-sm text-gray-600 sm:text-base">Esnafımızın ve müşterilerimizin en çok merak ettikleri</p>
-          <div className="w-16 sm:w-24 h-1 bg-secondary-500 mx-auto rounded-full mt-3 sm:mt-4"></div>
+          <p className="text-[13px] leading-snug text-gray-600 sm:text-base">Esnafımızın ve müşterilerimizin en çok merak ettikleri</p>
+          <div className="w-14 sm:w-24 h-1 bg-secondary-500 mx-auto rounded-full mt-2.5 sm:mt-4"></div>
         </div>
 
-        <div className="space-y-2.5 sm:space-y-4">
+        <div className="space-y-2 sm:space-y-4">
           {FAQ_ITEMS.map((faq, index) => {
             const isOpen = openIndex === index;
             const FaqIcon = faq.icon;
@@ -638,7 +638,7 @@ function FAQSection() {
               <button
                 onClick={() => setOpenIndex(isOpen ? null : index)}
                 aria-expanded={isOpen}
-                className="flex w-full items-center gap-3 px-3.5 py-3.5 text-left transition-colors hover:bg-gray-50 sm:gap-4 sm:px-6 sm:py-5"
+                className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-gray-50 sm:gap-4 sm:px-6 sm:py-5"
               >
                 <span
                   className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors sm:h-10 sm:w-10 sm:rounded-xl ${
@@ -647,7 +647,7 @@ function FAQSection() {
                 >
                   <FaqIcon className="h-4 w-4 sm:h-5 sm:w-5" />
                 </span>
-                <span className="min-w-0 flex-1 pr-1 font-heading text-sm font-semibold text-gray-900 sm:pr-2 sm:text-lg">
+                <span className="min-w-0 flex-1 pr-1 font-heading text-[13px] font-semibold leading-snug text-gray-900 sm:pr-2 sm:text-lg">
                   {faq.question}
                 </span>
                 <span className="flex-shrink-0">
@@ -659,9 +659,9 @@ function FAQSection() {
                 </span>
               </button>
               {isOpen && (
-                <div className="px-3.5 pb-4 sm:px-6 sm:pb-6">
-                  <div className="border-t border-gray-100 pl-0 pt-3 sm:pl-14 sm:pt-4">
-                    <p className="text-xs leading-relaxed text-gray-600 sm:text-base">{faq.answer}</p>
+                <div className="px-3 pb-3 sm:px-6 sm:pb-6">
+                  <div className="border-t border-gray-100 pl-0 pt-2.5 sm:pl-14 sm:pt-4">
+                    <p className="text-[11px] leading-relaxed text-gray-600 sm:text-base">{faq.answer}</p>
                   </div>
                 </div>
               )}
@@ -676,26 +676,26 @@ function FAQSection() {
 
 function ContactSection() {
   return (
-    <section className="py-10 sm:py-14 lg:py-20 bg-white">
+    <section className="py-6 sm:py-12 lg:py-20 bg-white">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-6 sm:mb-12">
-          <h2 className="text-2xl sm:text-3xl md:text-4xl font-heading font-bold text-primary-700 mb-2.5 sm:mb-4">
+        <div className="text-center mb-4 sm:mb-12">
+          <h2 className="text-xl sm:text-3xl md:text-4xl font-heading font-bold text-primary-700 mb-2 sm:mb-4">
             Müşteri & Esnaf Destek Hattı
           </h2>
-          <div className="w-16 sm:w-24 h-1 bg-secondary-500 mx-auto rounded-full mt-3 sm:mt-4"></div>
+          <div className="w-14 sm:w-24 h-1 bg-secondary-500 mx-auto rounded-full mt-2.5 sm:mt-4"></div>
         </div>
 
         <div className="max-w-lg mx-auto">
-          <div className="bg-white border border-gray-200 rounded-3xl shadow-xl p-5 sm:p-8 md:p-10 text-center">
-            <div className="w-12 h-12 sm:w-16 sm:h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4 sm:mb-6">
-              <MessageCircle className="w-6 h-6 sm:w-8 sm:h-8 text-green-600" />
+          <div className="bg-white border border-gray-200 rounded-2xl sm:rounded-3xl shadow-xl p-4 sm:p-8 md:p-10 text-center">
+            <div className="w-11 h-11 sm:w-16 sm:h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-3 sm:mb-6">
+              <MessageCircle className="w-5 h-5 sm:w-8 sm:h-8 text-green-600" />
             </div>
 
-            <p className="text-sm sm:text-base text-gray-600 leading-relaxed mb-5 sm:mb-8">
+            <p className="text-[13px] sm:text-base text-gray-600 leading-relaxed mb-4 sm:mb-8">
               Onkatı sistemi hakkında sorularınız, üyelik ve iş birliği talepleriniz için doğrudan WhatsApp üzerinden iletişime geçebilirsiniz.
             </p>
 
-            <div className="space-y-2.5 sm:space-y-4 mb-5 sm:mb-8">
+            <div className="space-y-2 sm:space-y-4 mb-4 sm:mb-8">
               <div className="flex items-center justify-center gap-2 sm:gap-3 text-gray-700">
                 <MapPin className="w-4 h-4 sm:w-5 sm:h-5 text-primary-600 flex-shrink-0" />
                 <span className="text-sm sm:text-base font-medium">Selçuklu / KONYA (Türkiye)</span>
