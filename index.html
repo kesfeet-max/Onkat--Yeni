@@ -24,6 +24,20 @@
     <link rel="apple-touch-icon" href="/assets/onkati-apple-touch-icon.png?v=3" />
     <link rel="apple-touch-icon" sizes="180x180" href="/assets/onkati-apple-touch-icon.png?v=3" />
     <link rel="apple-touch-icon" sizes="512x512" href="/assets/onkati-pwa-512.png?v=3" />
+    <script>
+      // PWA kurulum teklifini React yüklenmeden önce yakala.
+      // Bu olay yalnızca uygulama telefonda KURULU DEĞİLSE tetiklenir;
+      // bu yüzden banner mantığı "kurulu mu?" kararını buradan doğrular.
+      window.__onkatiInstallPrompt = null;
+      window.addEventListener('beforeinstallprompt', function (event) {
+        event.preventDefault();
+        window.__onkatiInstallPrompt = event;
+        window.dispatchEvent(new Event('onkati-can-install'));
+      });
+      window.addEventListener('appinstalled', function () {
+        window.__onkatiInstallPrompt = null;
+      });
+    </script>
     <title>Onkati - Mahalle Sadakat Sistemi</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

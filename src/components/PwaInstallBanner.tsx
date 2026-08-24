@@ -1,16 +1,56 @@
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 
+/** Uygulamanın gerçekten kurulduğunu KALICI olarak saklar (localStorage). */
 const PWA_INSTALLED_KEY = 'pwa_installed';
-const PWA_DISMISSED_KEY = 'pwa_banner_dismissed';
+/** Kullanıcı çarpıya bastığında sadece o oturum için gizler (sessionStorage). */
+const PWA_SESSION_DISMISSED_KEY = 'pwa_banner_dismissed_session';
+/** Önceki sürümde kalıcı gizleme için kullanılan anahtar; artık geçersiz, temizlenir. */
+const LEGACY_DISMISSED_KEY = 'pwa_banner_dismissed';
+
+type InstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+};
+
+declare global {
+  interface Window {
+    /** index.html içinde erken yakalanan kurulum teklifi olayı. */
+    __onkatiInstallPrompt?: InstallPromptEvent | null;
+  }
+}
+
+/** Uygulama ana ekrandan (standalone) açıldıysa kurulu kabul edilir. */
+function isStandaloneMode(): boolean {
+  return (
+    window.matchMedia('(display-mode: standalone)').matches ||
+    (window.navigator as unknown as { standalone?: boolean }).standalone === true
+  );
+}
+
+function isIosDevice(): boolean {
+  return /iphone|ipad|ipod/i.test(window.navigator.userAgent);
+}
 
 interface PwaInstallBannerProps {
   variant: 'customer' | 'merchant';
 }
 
+/**
+ * Ana ekrana ekleme davet kutusu.
+ *
+ * Kapanma mantığı:
+ * - Sağ üstteki "X": sadece o anki oturum için gizlenir (sessionStorage).
+ *   Kullanıcı siteye daha sonra tekrar girdiğinde kutu yeniden görünür.
+ * - Gerçek kurulum (`appinstalled` veya kurulum teklifinin kabul edilmesi):
+ *   kalıcı olarak gizlenir (localStorage).
+ * - Kullanıcı uygulamayı telefondan silerse tarayıcı yeniden `beforeinstallprompt`
+ *   tetikler; bu durumda kalıcı kayıt temizlenir ve kutu tekrar aktif olur.
+ */
 export function PwaInstallBanner({ variant }: PwaInstallBannerProps) {
   const [showBanner, setShowBanner] = useState(false);
-  const deferredPromptRef = useRef<any>(null);
+  const [showManualHint, setShowManualHint] = useState(false);
+  const deferredPromptRef = useRef<InstallPromptEvent | null>(null);
 
   const content = variant === 'merchant'
     ? {
@@ -25,90 +65,143 @@ export function PwaInstallBanner({ variant }: PwaInstallBannerProps) {
       };
 
   useEffect(() => {
-    // 1. Daha önce kapatılmış mı kontrol et
-    if (localStorage.getItem(PWA_DISMISSED_KEY) === 'true') {
-      setShowBanner(false);
-      return;
-    }
+    // Eski sürümdeki kalıcı kapatma kaydı artık kullanılmıyor; kullanıcıyı sonsuza kadar susturmasın.
+    localStorage.removeItem(LEGACY_DISMISSED_KEY);
 
-    // 2. Daha önce kurulmuş mu kontrol et
-    if (localStorage.getItem(PWA_INSTALLED_KEY) === 'true') {
-      setShowBanner(false);
-      return;
-    }
+    const isDismissedForSession = () =>
+      sessionStorage.getItem(PWA_SESSION_DISMISSED_KEY) === 'true';
 
-    // 3. Standalone modda mı kontrol et
-    const isStandalone =
-      window.matchMedia('(display-mode: standalone)').matches ||
-      (window.navigator as any).standalone === true;
-
-    if (isStandalone) {
+    /** Uygulama kuruldu: kalıcı olarak gizle. */
+    const markInstalled = () => {
       localStorage.setItem(PWA_INSTALLED_KEY, 'true');
-      setShowBanner(false);
-      return;
-    }
-
-    // 4. Kurulmamış, kapatılmamış ve standalone değil — banner'ı göster
-    setShowBanner(true);
-
-    // beforeinstallprompt olayını global olarak yakala
-    const beforeInstallHandler = (e: Event) => {
-      e.preventDefault();
-      deferredPromptRef.current = e;
-    };
-    window.addEventListener('beforeinstallprompt', beforeInstallHandler);
-
-    // appinstalled olayını dinle
-    const appInstalledHandler = () => {
-      localStorage.setItem(PWA_INSTALLED_KEY, 'true');
+      setShowManualHint(false);
       setShowBanner(false);
     };
-    window.addEventListener('appinstalled', appInstalledHandler);
 
-    // Standalone moda geçiş dinle
-    const mediaQuery = window.matchMedia('(display-mode: standalone)');
-    const standaloneListener = (e: MediaQueryListEvent) => {
-      if (e.matches) {
-        localStorage.setItem(PWA_INSTALLED_KEY, 'true');
+    /** Tarayıcı kurulum teklifi veriyorsa uygulama telefonda yok demektir. */
+    const markUninstalled = () => {
+      localStorage.removeItem(PWA_INSTALLED_KEY);
+      setShowBanner(!isDismissedForSession());
+    };
+
+    /** Mevcut duruma göre kutunun görünürlüğünü yeniden hesaplar. */
+    const evaluate = () => {
+      if (isStandaloneMode()) {
+        markInstalled();
+        return;
+      }
+
+      const capturedPrompt = window.__onkatiInstallPrompt ?? null;
+
+      if (capturedPrompt) {
+        // Kurulum teklifi mevcut → uygulama kurulu değil (veya silinmiş).
+        deferredPromptRef.current = capturedPrompt;
+        markUninstalled();
+        return;
+      }
+
+      if (localStorage.getItem(PWA_INSTALLED_KEY) === 'true') {
         setShowBanner(false);
+        return;
+      }
+
+      setShowBanner(!isDismissedForSession());
+    };
+
+    evaluate();
+
+    const beforeInstallHandler = (event: Event) => {
+      event.preventDefault();
+      const promptEvent = event as InstallPromptEvent;
+      deferredPromptRef.current = promptEvent;
+      window.__onkatiInstallPrompt = promptEvent;
+      // Uygulama silinip siteye tekrar girildiğinde bu olay yeniden tetiklenir.
+      markUninstalled();
+    };
+
+    const canInstallHandler = () => {
+      if (window.__onkatiInstallPrompt) {
+        deferredPromptRef.current = window.__onkatiInstallPrompt;
+        markUninstalled();
       }
     };
+
+    const appInstalledHandler = () => {
+      deferredPromptRef.current = null;
+      window.__onkatiInstallPrompt = null;
+      // Kurulum gerçekleştiğine göre oturum bazlı kapatma kaydı da gereksiz.
+      sessionStorage.removeItem(PWA_SESSION_DISMISSED_KEY);
+      markInstalled();
+    };
+
+    const mediaQuery = window.matchMedia('(display-mode: standalone)');
+    const standaloneListener = (event: MediaQueryListEvent) => {
+      if (event.matches) {
+        markInstalled();
+      }
+    };
+
+    // Kullanıcı sekmeye geri döndüğünde durum değişmiş olabilir (kurulum veya silme).
+    const visibilityHandler = () => {
+      if (document.visibilityState === 'visible') {
+        evaluate();
+      }
+    };
+
+    window.addEventListener('beforeinstallprompt', beforeInstallHandler);
+    window.addEventListener('onkati-can-install', canInstallHandler);
+    window.addEventListener('appinstalled', appInstalledHandler);
     mediaQuery.addEventListener('change', standaloneListener);
+    document.addEventListener('visibilitychange', visibilityHandler);
 
     return () => {
       window.removeEventListener('beforeinstallprompt', beforeInstallHandler);
+      window.removeEventListener('onkati-can-install', canInstallHandler);
       window.removeEventListener('appinstalled', appInstalledHandler);
       mediaQuery.removeEventListener('change', standaloneListener);
+      document.removeEventListener('visibilitychange', visibilityHandler);
     };
   }, []);
 
   const handleInstall = async () => {
-    if (deferredPromptRef.current) {
-      try {
-        deferredPromptRef.current.prompt();
-        const result = await deferredPromptRef.current.userChoice;
-        if (result.outcome === 'accepted') {
-          localStorage.setItem(PWA_INSTALLED_KEY, 'true');
-          setShowBanner(false);
-        }
-      } catch (err) {
-        console.warn('PWA install prompt error:', err);
-      }
-      deferredPromptRef.current = null;
+    const installPrompt = deferredPromptRef.current ?? window.__onkatiInstallPrompt ?? null;
+
+    // Kurulum teklifi yoksa (örn. iOS Safari) elle ekleme yönlendirmesi göster.
+    if (!installPrompt) {
+      setShowManualHint(true);
+      return;
     }
 
-    // Bildirim izni iste
-    if ('Notification' in window && Notification.permission === 'default') {
-      try {
-        await Notification.requestPermission();
-      } catch {
-        // Sessizce devam
+    try {
+      await installPrompt.prompt();
+      const { outcome } = await installPrompt.userChoice;
+
+      deferredPromptRef.current = null;
+      window.__onkatiInstallPrompt = null;
+
+      if (outcome === 'accepted') {
+        // Gerçek kurulum: kalıcı olarak gizle.
+        localStorage.setItem(PWA_INSTALLED_KEY, 'true');
+        sessionStorage.removeItem(PWA_SESSION_DISMISSED_KEY);
+        setShowBanner(false);
+
+        if ('Notification' in window && Notification.permission === 'default') {
+          try {
+            await Notification.requestPermission();
+          } catch {
+            // Bildirim izni alınamazsa sessizce devam
+          }
+        }
       }
+      // Kullanıcı kurulumu reddettiyse kutu açık kalır, tekrar denenebilir.
+    } catch (err) {
+      console.warn('PWA install prompt error:', err);
     }
   };
 
+  /** Sadece bu oturum için gizle; sonraki ziyarette kutu yeniden görünür. */
   const handleDismiss = () => {
-    localStorage.setItem(PWA_DISMISSED_KEY, 'true');
+    sessionStorage.setItem(PWA_SESSION_DISMISSED_KEY, 'true');
     setShowBanner(false);
   };
 
@@ -117,7 +210,7 @@ export function PwaInstallBanner({ variant }: PwaInstallBannerProps) {
   return (
     <div className="pwa-banner">
       <div className="pwa-banner-inner">
-        {/* Kapatma Butonu */}
+        {/* Kapatma Butonu — sadece bu oturum için gizler */}
         <button
           onClick={handleDismiss}
           className="pwa-banner-close"
@@ -128,6 +221,13 @@ export function PwaInstallBanner({ variant }: PwaInstallBannerProps) {
         <div className="pwa-banner-text">
           <h3 className="pwa-banner-title">{content.title}</h3>
           <p className="pwa-banner-desc">{content.description}</p>
+          {showManualHint && (
+            <p className="pwa-banner-desc">
+              {isIosDevice()
+                ? 'Safari\'de alttaki Paylaş simgesine dokun, ardından "Ana Ekrana Ekle" seçeneğini seç.'
+                : 'Tarayıcı menüsünü aç ve "Uygulamayı yükle" / "Ana ekrana ekle" seçeneğine dokun.'}
+            </p>
+          )}
         </div>
         <button onClick={handleInstall} className="pwa-banner-btn">
           {content.button}
