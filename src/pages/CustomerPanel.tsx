@@ -1041,15 +1041,16 @@ export function CustomerPanel() {
 
       {/* Header — ince, zarif başlık alanı (sadece banner) */}
       <header className="bg-gradient-to-r from-emerald-700 via-emerald-600 to-teal-600 text-white px-5 pt-5 pb-14 shadow-lg">
-        <div className="flex items-center justify-between max-w-lg mx-auto">
-          <div className="min-w-0 flex items-center gap-3">
-            <BrandLogo to="/" size="sm" />
-            <h1 className="text-sm sm:text-base font-bold truncate">
-              Hoş geldiniz, {customer.full_name || 'Müşteri'}
+        <div className="flex items-center gap-2 sm:gap-3 max-w-lg mx-auto">
+          <BrandLogo to="/" size="panel" />
+          {/* Karşılama metni iki satır: üstte selamlama, altta ad soyad (taşma yok) */}
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] sm:text-xs font-semibold text-white/80 leading-tight">
+              Hoş geldiniz
+            </p>
+            <h1 className="text-[15px] sm:text-lg font-bold leading-snug break-words">
+              {customer.full_name || 'Müşteri'}
             </h1>
-          </div>
-          <div className="w-10 h-10 shrink-0 bg-white/15 rounded-xl flex items-center justify-center border border-white/20">
-            <Wallet className="w-5 h-5" />
           </div>
         </div>
       </header>

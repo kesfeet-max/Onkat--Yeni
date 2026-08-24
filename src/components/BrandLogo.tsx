@@ -7,7 +7,7 @@ import { Link } from 'react-router-dom';
 const LOGO_SRC =
   'https://mgx-backend-cdn.metadl.com/generate/images/1358219/2026-08-22/u7awbyaaakfa/onkati-wordmark-gold-transparent.png';
 
-type LogoSize = 'sm' | 'md' | 'lg';
+type LogoSize = 'sm' | 'md' | 'lg' | 'panel';
 
 /**
  * Responsive yükseklikler (yatay logo, genişlik otomatik — görsel oranı 3:2).
@@ -17,11 +17,14 @@ type LogoSize = 'sm' | 'md' | 'lg';
  * - md: mobil 72px / masaüstü 80px
  * - lg (giriş, kayıt, ana sayfa, alt bilgi): mobil 96px / masaüstü 112px
  *   Mobilde logo ilk dikkat çeken unsur olsun diye önceki 56px'in yaklaşık iki katı.
+ * - panel (müşteri/esnaf paneli üst barı): sm ölçeğinin tam iki katı —
+ *   mobil 112px / masaüstü 128px. Yanındaki karşılama metni iki satıra alındığı için sığar.
  */
 const SIZE_CLASSES: Record<LogoSize, string> = {
   sm: 'h-14 sm:h-16 md:h-16 -my-1.5 md:-my-2',
   md: 'h-[4.5rem] sm:h-20 md:h-20 -my-2 md:-my-2.5',
   lg: 'h-24 sm:h-24 md:h-28 -my-2.5 md:-my-3',
+  panel: 'h-28 sm:h-32 md:h-32 -my-3 md:-my-4',
 };
 
 interface BrandLogoProps {
