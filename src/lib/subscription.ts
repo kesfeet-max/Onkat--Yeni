@@ -236,3 +236,83 @@ export function formatTrDate(date?: Date | null): string {
   if (!date || Number.isNaN(date.getTime())) return 'Belirtilmedi';
   return date.toLocaleDateString('tr-TR', { day: '2-digit', month: 'long', year: 'numeric' });
 }
+
+/** Tarihi kısa Türkçe formatta (GG.AA.YYYY) biçimlendirir. */
+export function formatTrShortDate(date?: Date | null): string {
+  if (!date || Number.isNaN(date.getTime())) return 'Belirtilmedi';
+  return date.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+/** 1 aylık uzatmanın gün karşılığı — takvim ayı değil, TAM 30 gün. */
+export const MONTH_EXTENSION_DAYS = 30;
+
+/** 12 aylık (yıllık) uzatmanın gün karşılığı. */
+export const YEAR_EXTENSION_DAYS = 365;
+
+/** Verilen ay sayısının gün karşılığını döndürür (1 ay = 30 gün, 12 ay = 365 gün). */
+export function monthsToExtensionDays(months: number): number {
+  const safe = Number.isFinite(months) && months >= 1 ? Math.trunc(months) : 1;
+  return safe === 12 ? YEAR_EXTENSION_DAYS : safe * MONTH_EXTENSION_DAYS;
+}
+
+/** Verilen tarihe tam gün ekler (saat/dakika bilgisi korunur). */
+function addDays(date: Date, days: number): Date {
+  return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
+}
+
+/** Abonelik uzatma hesabının sonucu. */
+export interface SubscriptionExtensionPlan {
+  /** Uzatmanın üzerine eklendiği baz tarih (mevcut bitiş veya bugün) */
+  baseDate: Date;
+  /** Hesaplanan yeni abonelik bitiş tarihi */
+  newEnd: Date;
+  /** Baz tarihin üzerine eklenen gün sayısı (1 ay = 30 gün) */
+  addedDays: number;
+  /** Mevcut süre geçmişte kaldığı için bugünden mi başlatıldı? */
+  startedFromToday: boolean;
+  /** Uzatma öncesindeki geçerli bitiş tarihi (hiç yoksa null) */
+  previousEnd: Date | null;
+}
+
+/**
+ * Abonelik uzatmasında kullanılacak yeni bitiş tarihini hesaplar.
+ *
+ * KURAL:
+ *  - Uzatma birimi TAM 30 GÜNDÜR (takvim ayı değil). "1 Ay Uzat" = +30 gün.
+ *  - Koşul A: Esnafın mevcut bitiş tarihi (deneme süresi `trial_ends_at` veya
+ *    ödenmiş abonelik `subscription_paid_until` — hangisi daha ileriyse) GELECEKTE ise,
+ *    30 gün bugünden değil O TARİHİN ÜZERİNE eklenir. Böylece esnaf erken ödediğinde
+ *    kalan günlerini kaybetmez.
+ *  - Koşul B: Mevcut bitiş tarihi GEÇMİŞTE kaldıysa (uzun süre ödeme yapılmadıysa),
+ *    yeni dönem bugünden başlatılır; geçmişe dönük gün hediye edilmez.
+ */
+export function computeExtendedPaidUntil(
+  source: MerchantSubscriptionSource | null | undefined,
+  months: number,
+  referenceDate: Date = new Date()
+): SubscriptionExtensionPlan {
+  const addedDays = monthsToExtensionDays(months);
+  const now = referenceDate;
+
+  const trialEnd = parseDate(source?.trial_ends_at);
+  const paidUntil = parseDate(source?.subscription_paid_until);
+
+  // Mevcut geçerli bitiş tarihi: iki alandan hangisi daha ileriyse o.
+  let previousEnd: Date | null = null;
+  if (trialEnd && paidUntil) {
+    previousEnd = paidUntil.getTime() >= trialEnd.getTime() ? paidUntil : trialEnd;
+  } else {
+    previousEnd = paidUntil || trialEnd || null;
+  }
+
+  const hasFutureEnd = !!previousEnd && previousEnd.getTime() > now.getTime();
+  const baseDate = hasFutureEnd ? new Date((previousEnd as Date).getTime()) : new Date(now.getTime());
+
+  return {
+    baseDate,
+    newEnd: addDays(baseDate, addedDays),
+    addedDays,
+    startedFromToday: !hasFutureEnd,
+    previousEnd,
+  };
+}

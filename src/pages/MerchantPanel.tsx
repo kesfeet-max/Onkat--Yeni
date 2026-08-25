@@ -52,6 +52,7 @@ import { toast } from '../lib/toast';
 import { triggerCampaignNotification } from '../lib/push-notifications';
 import { SubscriptionTab } from '../components/SubscriptionTab';
 import { BrandLogo } from '../components/BrandLogo';
+import { scrollWindowToTop } from '../components/ScrollToTop';
 import { resolveMerchantSubscription, buildStoreCode } from '../lib/subscription';
 
 type MerchantTab = 'islem' | 'musteriler' | 'gecmis' | 'abonelik' | 'profilim';
@@ -92,6 +93,10 @@ export function MerchantPanel() {
   const { user, profile, loading: authLoading, signOut } = useAuth();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<MerchantTab>('islem');
+  // Alt menüden sekme değiştirildiğinde içerik her zaman en üstten başlar
+  useEffect(() => {
+    scrollWindowToTop();
+  }, [activeTab]);
   const [profileSubTab, setProfileSubTab] = useState<ProfileSubTab>('bilgilerim');
   const [loading, setLoading] = useState(true);
   const [transactions, setTransactions] = useState<TransactionRecord[]>([]);
@@ -2499,15 +2504,15 @@ export function MerchantPanel() {
         )}
       </main>
 
-      {/* Fixed Bottom Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-[0_-4px_12px_rgba(0,0,0,0.08)] z-50">
+      {/* Fixed Bottom Navigation — arka plan üst başlıkla aynı kurumsal yeşil */}
+      <nav className="fixed bottom-0 left-0 right-0 bg-primary-600 border-t border-primary-700 shadow-[0_-4px_16px_rgba(0,0,0,0.18)] z-50">
         <div className="flex max-w-lg mx-auto">
           <button
             onClick={() => setActiveTab('islem')}
             className={`flex-1 py-3 flex flex-col items-center gap-0.5 transition ${
               activeTab === 'islem'
-                ? 'text-emerald-700'
-                : 'text-gray-400'
+                ? 'text-secondary-300'
+                : 'text-primary-100/75 hover:text-white'
             }`}
           >
             <QrCode className="w-5 h-5" />
@@ -2517,8 +2522,8 @@ export function MerchantPanel() {
             onClick={() => setActiveTab('musteriler')}
             className={`flex-1 py-3 flex flex-col items-center gap-0.5 transition ${
               activeTab === 'musteriler'
-                ? 'text-emerald-700'
-                : 'text-gray-400'
+                ? 'text-secondary-300'
+                : 'text-primary-100/75 hover:text-white'
             }`}
           >
             <Users className="w-5 h-5" />
@@ -2528,8 +2533,8 @@ export function MerchantPanel() {
             onClick={() => setActiveTab('gecmis')}
             className={`flex-1 py-3 flex flex-col items-center gap-0.5 transition ${
               activeTab === 'gecmis'
-                ? 'text-emerald-700'
-                : 'text-gray-400'
+                ? 'text-secondary-300'
+                : 'text-primary-100/75 hover:text-white'
             }`}
           >
             <History className="w-5 h-5" />
@@ -2539,8 +2544,8 @@ export function MerchantPanel() {
             onClick={() => setActiveTab('abonelik')}
             className={`flex-1 py-3 flex flex-col items-center gap-0.5 transition relative ${
               activeTab === 'abonelik'
-                ? 'text-emerald-700'
-                : 'text-gray-400'
+                ? 'text-secondary-300'
+                : 'text-primary-100/75 hover:text-white'
             }`}
           >
             {subscription.needsPayment && (
@@ -2558,8 +2563,8 @@ export function MerchantPanel() {
             onClick={() => setActiveTab('profilim')}
             className={`flex-1 py-3 flex flex-col items-center gap-0.5 transition ${
               activeTab === 'profilim'
-                ? 'text-emerald-700'
-                : 'text-gray-400'
+                ? 'text-secondary-300'
+                : 'text-primary-100/75 hover:text-white'
             }`}
           >
             <User className="w-5 h-5" />

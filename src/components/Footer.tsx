@@ -1,5 +1,21 @@
 import { Link } from 'react-router-dom';
 import { BrandLogo } from './BrandLogo';
+import { scrollWindowToTop } from './ScrollToTop';
+
+/** Footer menülerinde kullanılan bağlantı. Tıklandığında sayfa en üste kaydırılır. */
+function FooterLink({ to, children }: { to: string; children: React.ReactNode }) {
+  return (
+    <li>
+      <Link
+        to={to}
+        onClick={scrollWindowToTop}
+        className="text-primary-100 hover:text-secondary-300 transition-colors text-sm"
+      >
+        {children}
+      </Link>
+    </li>
+  );
+}
 
 export function Footer() {
   return (
@@ -20,47 +36,19 @@ export function Footer() {
           <div>
             <h3 className="font-heading font-semibold text-lg mb-4">Hizli Erisim</h3>
             <ul className="space-y-2">
-              <li>
-                <Link to="/" className="text-primary-100 hover:text-secondary-300 transition-colors text-sm">
-                  Ana Sayfa
-                </Link>
-              </li>
-              <li>
-                <Link to="/hakkimizda" className="text-primary-100 hover:text-secondary-300 transition-colors text-sm">
-                  Hakkimizda
-                </Link>
-              </li>
-              <li>
-                <Link to="/giris" className="text-primary-100 hover:text-secondary-300 transition-colors text-sm">
-                  Giris Yap
-                </Link>
-              </li>
+              <FooterLink to="/">Ana Sayfa</FooterLink>
+              <FooterLink to="/hakkimizda">Hakkimizda</FooterLink>
+              <FooterLink to="/giris">Giris Yap</FooterLink>
             </ul>
           </div>
 
           <div>
             <h3 className="font-heading font-semibold text-lg mb-4">Yasal</h3>
             <ul className="space-y-2">
-              <li>
-                <Link to="/yasal/kvkk" className="text-primary-100 hover:text-secondary-300 transition-colors text-sm">
-                  KVKK Aydinlatma Metni
-                </Link>
-              </li>
-              <li>
-                <Link to="/yasal/esnaf-kosullari" className="text-primary-100 hover:text-secondary-300 transition-colors text-sm">
-                  Esnaf Uyelik ve Hizmet Kosullari
-                </Link>
-              </li>
-              <li>
-                <Link to="/yasal/musteri-kosullari" className="text-primary-100 hover:text-secondary-300 transition-colors text-sm">
-                  Musteri Uyelik ve Hizmet Kosullari
-                </Link>
-              </li>
-              <li>
-                <Link to="/yasal/gizlilik" className="text-primary-100 hover:text-secondary-300 transition-colors text-sm">
-                  Gizlilik Politikasi
-                </Link>
-              </li>
+              <FooterLink to="/yasal/kvkk">KVKK Aydinlatma Metni</FooterLink>
+              <FooterLink to="/yasal/esnaf-kosullari">Esnaf Uyelik ve Hizmet Kosullari</FooterLink>
+              <FooterLink to="/yasal/musteri-kosullari">Musteri Uyelik ve Hizmet Kosullari</FooterLink>
+              <FooterLink to="/yasal/gizlilik">Gizlilik Politikasi</FooterLink>
             </ul>
           </div>
         </div>

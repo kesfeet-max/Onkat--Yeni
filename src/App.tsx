@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './auth/AuthContext';
 import { Layout } from './components/Layout';
 import { RedirectProvider } from './components/RedirectHandler';
+import { ScrollToTop } from './components/ScrollToTop';
 import { ToastContainer } from './components/ToastContainer';
 import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/LoginPage';
@@ -22,6 +23,8 @@ function App() {
     <BrowserRouter>
       <AuthProvider>
         <RedirectProvider>
+          {/* Her rota değişiminde sayfayı otomatik olarak en üste kaydırır */}
+          <ScrollToTop />
           <ToastContainer />
           <Routes>
             <Route element={<Layout />}>

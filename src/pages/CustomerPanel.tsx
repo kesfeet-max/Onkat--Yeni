@@ -26,6 +26,7 @@ import {
   CalendarDays,
 } from 'lucide-react';
 import { BrandLogo } from '../components/BrandLogo';
+import { scrollWindowToTop } from '../components/ScrollToTop';
 import { useAuth } from '../auth/AuthContext';
 import { supabase } from '../lib/supabase';
 import { toast } from '../lib/toast';
@@ -77,6 +78,10 @@ export function CustomerPanel() {
   const { user, profile, loading: authLoading, signOut } = useAuth();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<TabType>('qr');
+  // Alt menüden sekme değiştirildiğinde içerik her zaman en üstten başlar
+  useEffect(() => {
+    scrollWindowToTop();
+  }, [activeTab]);
   const [dataLoading, setDataLoading] = useState(true);
   const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
   const [storeBalances, setStoreBalances] = useState<StoreBalance[]>([]);
@@ -1549,13 +1554,13 @@ export function CustomerPanel() {
         )}
       </main>
 
-      {/* Fixed Bottom Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg z-50">
+      {/* Fixed Bottom Navigation — arka plan üst başlıkla aynı kurumsal yeşil */}
+      <nav className="fixed bottom-0 left-0 right-0 bg-primary-600 border-t border-primary-700 shadow-[0_-4px_16px_rgba(0,0,0,0.18)] z-50">
         <div className="max-w-lg mx-auto flex">
           <button
             onClick={() => setActiveTab('qr')}
             className={`flex-1 py-3 flex flex-col items-center gap-1 transition ${
-              activeTab === 'qr' ? 'text-emerald-600' : 'text-gray-400 hover:text-gray-600'
+              activeTab === 'qr' ? 'text-secondary-300' : 'text-primary-100/75 hover:text-white'
             }`}
           >
             <QrCode className="w-5 h-5" />
@@ -1564,7 +1569,7 @@ export function CustomerPanel() {
           <button
             onClick={() => setActiveTab('esnaflar')}
             className={`flex-1 py-3 flex flex-col items-center gap-1 transition ${
-              activeTab === 'esnaflar' ? 'text-emerald-600' : 'text-gray-400 hover:text-gray-600'
+              activeTab === 'esnaflar' ? 'text-secondary-300' : 'text-primary-100/75 hover:text-white'
             }`}
           >
             <Store className="w-5 h-5" />
@@ -1573,7 +1578,7 @@ export function CustomerPanel() {
           <button
             onClick={() => setActiveTab('gecmis')}
             className={`flex-1 py-3 flex flex-col items-center gap-1 transition ${
-              activeTab === 'gecmis' ? 'text-emerald-600' : 'text-gray-400 hover:text-gray-600'
+              activeTab === 'gecmis' ? 'text-secondary-300' : 'text-primary-100/75 hover:text-white'
             }`}
           >
             <History className="w-5 h-5" />
@@ -1582,7 +1587,7 @@ export function CustomerPanel() {
           <button
             onClick={() => { setActiveTab('duyurular'); fetchNotifications(); }}
             className={`flex-1 py-3 flex flex-col items-center gap-1 transition relative ${
-              activeTab === 'duyurular' ? 'text-purple-600' : 'text-gray-400 hover:text-gray-600'
+              activeTab === 'duyurular' ? 'text-secondary-300' : 'text-primary-100/75 hover:text-white'
             }`}
           >
             <Bell className="w-5 h-5" />
@@ -1596,7 +1601,7 @@ export function CustomerPanel() {
           <button
             onClick={() => setActiveTab('profilim')}
             className={`flex-1 py-3 flex flex-col items-center gap-1 transition ${
-              activeTab === 'profilim' ? 'text-emerald-600' : 'text-gray-400 hover:text-gray-600'
+              activeTab === 'profilim' ? 'text-secondary-300' : 'text-primary-100/75 hover:text-white'
             }`}
           >
             <User className="w-5 h-5" />

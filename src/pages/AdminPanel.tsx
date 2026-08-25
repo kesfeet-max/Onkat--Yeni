@@ -29,7 +29,12 @@ import {
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { formatCurrency, formatDate } from '../lib/utils';
-import { resolveMerchantSubscription, formatTrDate } from '../lib/subscription';
+import {
+  resolveMerchantSubscription,
+  formatTrDate,
+  formatTrShortDate,
+  computeExtendedPaidUntil,
+} from '../lib/subscription';
 
 interface AdminData {
   id: string;
@@ -655,6 +660,15 @@ export function AdminPanel() {
   /**
    * Havale/EFT kontrolü sonrası esnafın abonelik süresini uzatır.
    * Süre uzatma tamamen manuel bir yönetici işlemidir.
+   *
+   * TARİH MANTIĞI (bugünün tarihi baz ALINMAZ):
+   *  - Koşul A: Esnafın mevcut bitiş tarihi (deneme süresi veya ödenmiş abonelik —
+   *    hangisi daha ileriyse) gelecekteyse, süre O TARİHİN üzerine eklenir.
+   *    Örn. bitişi 10 Eylül olan esnaf bugün uzatılırsa yeni bitiş 10 Ekim olur.
+   *  - Koşul B: Mevcut bitiş tarihi geçmişte kaldıysa yeni dönem bugünden başlatılır.
+   *
+   * Hesap hem veritabanı fonksiyonunda hem burada yapılır; veritabanındaki fonksiyon
+   * henüz güncellenmemişse (eski sürüm bugünden ekliyordu) doğru tarih ile düzeltilir.
    */
   const extendSubscription = async (merchant: MerchantData, months: number) => {
     const storeId = Number(merchant.store_id);
@@ -663,29 +677,81 @@ export function AdminPanel() {
       return;
     }
 
+    // Beklenen doğru bitiş tarihi (mevcut bitişin üzerine eklenmiş hali)
+    const plan = computeExtendedPaidUntil(merchant, months);
+    const expectedEndIso = plan.newEnd.toISOString();
+    const storeLabel = merchant.store_name || 'Esnaf';
+
+    /** Doğru tarihi doğrudan tabloya yazar (RPC yok/eski sürüm ise devreye girer). */
+    const writeExpectedEnd = async () => {
+      const { data, error } = await supabase
+        .from('merchants')
+        .update({
+          is_active: true,
+          subscription_status: 'active',
+          last_payment_approved_at: new Date().toISOString(),
+          subscription_paid_until: expectedEndIso,
+        })
+        .eq('id', merchant.id)
+        .select('id');
+
+      if (error) throw error;
+      if (!data || data.length === 0) {
+        throw new Error('Kayıt güncellenemedi. Yönetici yetkisi veya veritabanı güncellemesini kontrol edin.');
+      }
+    };
+
     setExtendingId(merchant.id);
     setMessage(null);
     try {
+      let appliedEnd: Date | null = null;
+
       const { data, error } = await supabase.rpc('approve_merchant_payment', {
         p_store_id: storeId,
         p_months: months,
       });
 
-      if (error) throw error;
+      if (error) {
+        // Fonksiyon bulunamadı / çalıştırılamadıysa doğrudan güncelleme ile devam et.
+        await writeExpectedEnd();
+        appliedEnd = plan.newEnd;
+      } else {
+        // Fonksiyon eski sürümde boolean, yeni sürümde json döndürür.
+        if (data && typeof data === 'object' && (data as any).success === false) {
+          setMessage({ type: 'error', text: (data as any).error || 'Süre uzatılamadı' });
+          return;
+        }
+        if (data === false) {
+          setMessage({ type: 'error', text: 'Esnaf bulunamadı, süre uzatılamadı' });
+          return;
+        }
 
-      // Fonksiyon eski sürümde boolean, yeni sürümde json döndürür.
-      if (data && typeof data === 'object' && (data as any).success === false) {
-        setMessage({ type: 'error', text: (data as any).error || 'Süre uzatılamadı' });
-        return;
+        const returnedRaw =
+          data && typeof data === 'object' ? (data as any).subscription_paid_until : null;
+        const returnedEnd = returnedRaw ? new Date(returnedRaw) : null;
+        const returnedValid = returnedEnd && !Number.isNaN(returnedEnd.getTime());
+
+        // Eski fonksiyon sürümü deneme süresini yok sayıp bugünden takvim ayı ekliyordu.
+        // Beklenen tarihten 12 saatten fazla sapma varsa doğru tarihle düzeltilir.
+        const driftMs = returnedValid
+          ? Math.abs(returnedEnd.getTime() - plan.newEnd.getTime())
+          : Number.POSITIVE_INFINITY;
+
+        if (driftMs > 12 * 60 * 60 * 1000) {
+          await writeExpectedEnd();
+          appliedEnd = plan.newEnd;
+        } else {
+          appliedEnd = returnedEnd;
+        }
       }
-      if (data === false) {
-        setMessage({ type: 'error', text: 'Esnaf bulunamadı, süre uzatılamadı' });
-        return;
-      }
+
+      const basisNote = plan.startedFromToday
+        ? 'Süresi dolmuş olduğu için yeni dönem bugünden başlatıldı.'
+        : `Mevcut bitiş tarihi (${formatTrShortDate(plan.previousEnd)}) korunarak üzerine eklendi.`;
 
       setMessage({
         type: 'success',
-        text: `${merchant.store_name || 'Esnaf'} için ödeme onaylandı, abonelik ${months} ay uzatıldı.`,
+        text: `${storeLabel} için ödeme onaylandı, aboneliğe ${plan.addedDays} gün eklendi. Yeni Bitiş: ${formatTrShortDate(appliedEnd)} — ${basisNote}`,
       });
       fetchData();
     } catch (err: any) {
