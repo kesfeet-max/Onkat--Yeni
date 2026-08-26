@@ -32,6 +32,7 @@ import { supabase } from '../lib/supabase';
 import { toast } from '../lib/toast';
 import { formatCurrency, formatDate } from '../lib/utils';
 import { QREngine, CameraFacing, getSavedCameraPreference } from '../lib/qr-engine';
+import { PHONE_LENGTH, normalizePhoneInput, validatePhone } from '../lib/validation';
 import QRCode from 'qrcode';
 
 type TabType = 'qr' | 'esnaflar' | 'gecmis' | 'duyurular' | 'profilim';
@@ -172,13 +173,22 @@ export function CustomerPanel() {
   }, [customer, user, customerProfileFormInitialized]);
 
   const handleSaveCustomerProfile = async () => {
+    // Telefon başında 0 ile tam 11 hane olmalı
+    const phoneResult = validatePhone(customerProfileForm.phone);
+    if (!phoneResult.valid) {
+      toast.error(phoneResult.message || 'Geçersiz telefon numarası.');
+      return;
+    }
+    const cleanedPhone = normalizePhoneInput(customerProfileForm.phone);
+    setCustomerProfileForm((prev) => ({ ...prev, phone: cleanedPhone }));
+
     setSavingCustomerProfile(true);
     try {
       // Customers tablosunu güncelle (phone)
       if (customer?.id) {
         const { error: customerError } = await supabase
           .from('customers')
-          .update({ phone: customerProfileForm.phone })
+          .update({ phone: cleanedPhone })
           .eq('id', customer.id);
         if (customerError) throw customerError;
       }
@@ -1487,10 +1497,13 @@ export function CustomerPanel() {
                   <input
                     type="tel"
                     value={customerProfileForm.phone}
-                    onChange={(e) => setCustomerProfileForm(prev => ({ ...prev, phone: e.target.value }))}
-                    placeholder="05XX XXX XX XX"
-                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm transition"
+                    onChange={(e) => setCustomerProfileForm(prev => ({ ...prev, phone: normalizePhoneInput(e.target.value) }))}
+                    placeholder="05073376385"
+                    inputMode="numeric"
+                    maxLength={PHONE_LENGTH}
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm transition tracking-wide"
                   />
+                  <p className="text-xs text-gray-400 mt-1">Başında 0 olacak şekilde 11 hane</p>
                 </div>
 
                 {/* E-posta Adresi */}

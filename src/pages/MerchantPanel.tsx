@@ -54,6 +54,14 @@ import { SubscriptionTab } from '../components/SubscriptionTab';
 import { BrandLogo } from '../components/BrandLogo';
 import { scrollWindowToTop } from '../components/ScrollToTop';
 import { resolveMerchantSubscription, buildStoreCode } from '../lib/subscription';
+import {
+  PHONE_LENGTH,
+  normalizePhoneInput,
+  normalizeFullName,
+  sanitizeFullNameInput,
+  validateFullName,
+  validatePhone,
+} from '../lib/validation';
 
 type MerchantTab = 'islem' | 'musteriler' | 'gecmis' | 'abonelik' | 'profilim';
 type ProfileSubTab = 'bilgilerim' | 'kampanyalar' | 'kasiyerler' | 'guvenlik' | 'ayarlar';
@@ -220,6 +228,24 @@ export function MerchantPanel() {
   }, [merchant, profile, user, profileFormInitialized]);
 
   const handleSaveProfile = async () => {
+    // Ad Soyad e-posta olamaz
+    const nameResult = validateFullName(profileForm.full_name);
+    if (!nameResult.valid) {
+      toast.error(nameResult.message || 'Lütfen geçerli bir ad ve soyad giriniz.');
+      return;
+    }
+
+    // Telefon başında 0 ile tam 11 hane olmalı
+    const phoneResult = validatePhone(profileForm.phone);
+    if (!phoneResult.valid) {
+      toast.error(phoneResult.message || 'Geçersiz telefon numarası.');
+      return;
+    }
+
+    const cleanedFullName = normalizeFullName(profileForm.full_name);
+    const cleanedPhone = normalizePhoneInput(profileForm.phone);
+    setProfileForm((prev) => ({ ...prev, full_name: cleanedFullName, phone: cleanedPhone }));
+
     setSavingProfile(true);
     try {
       // Merchants tablosunu güncelle (full_name, phone, store_name)
@@ -227,8 +253,8 @@ export function MerchantPanel() {
         const { error: merchantError } = await supabase
           .from('merchants')
           .update({
-            full_name: profileForm.full_name,
-            phone: profileForm.phone,
+            full_name: cleanedFullName,
+            phone: cleanedPhone,
             store_name: profileForm.store_name
           })
           .eq('id', merchant.id);
@@ -612,15 +638,31 @@ export function MerchantPanel() {
   };
 
   const addCashier = async () => {
-    if (!newCashierPhone.trim()) {
-      toast.error('Telefon numarası gerekli');
+    // Telefon başında 0 ile tam 11 hane olmalı
+    const phoneResult = validatePhone(newCashierPhone);
+    if (!phoneResult.valid) {
+      toast.error(phoneResult.message || 'Geçersiz telefon numarası.');
       return;
     }
+
+    // Ad Soyad opsiyonel; girildiyse e-posta olamaz
+    const nameResult = validateFullName(newCashierName, {
+      required: false,
+      requireSurname: false,
+    });
+    if (!nameResult.valid) {
+      toast.error(nameResult.message || 'Lütfen geçerli bir ad ve soyad giriniz.');
+      return;
+    }
+
+    const cleanedPhone = normalizePhoneInput(newCashierPhone);
+    const cleanedName = normalizeFullName(newCashierName);
+
     setAddingCashier(true);
     try {
       const { data, error } = await supabase.rpc('kasiyer_ekle', {
-        p_phone: newCashierPhone.trim(),
-        p_full_name: newCashierName.trim() || '',
+        p_phone: cleanedPhone,
+        p_full_name: cleanedName,
       });
       if (!error && data && (data as any).success) {
         const customerName = (data as any).customer_name || 'Kasiyer';
@@ -1851,10 +1893,12 @@ export function MerchantPanel() {
                     <input
                       type="text"
                       value={profileForm.full_name}
-                      onChange={(e) => setProfileForm(prev => ({ ...prev, full_name: e.target.value }))}
+                      onChange={(e) => setProfileForm(prev => ({ ...prev, full_name: sanitizeFullNameInput(e.target.value) }))}
                       placeholder="Ad Soyad"
+                      autoComplete="name"
                       className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm transition"
                     />
+                    <p className="text-xs text-gray-400 mt-1">E-posta adresi değil, ad ve soyad yazın</p>
                   </div>
 
                   {/* Telefon Numarası */}
@@ -1863,10 +1907,13 @@ export function MerchantPanel() {
                     <input
                       type="tel"
                       value={profileForm.phone}
-                      onChange={(e) => setProfileForm(prev => ({ ...prev, phone: e.target.value }))}
-                      placeholder="05XX XXX XX XX"
-                      className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm transition"
+                      onChange={(e) => setProfileForm(prev => ({ ...prev, phone: normalizePhoneInput(e.target.value) }))}
+                      placeholder="05073376385"
+                      inputMode="numeric"
+                      maxLength={PHONE_LENGTH}
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm transition tracking-wide"
                     />
+                    <p className="text-xs text-gray-400 mt-1">Başında 0 olacak şekilde 11 hane</p>
                   </div>
 
                   {/* E-posta Adresi */}
@@ -2221,7 +2268,7 @@ export function MerchantPanel() {
                   <input
                     type="text"
                     value={newCashierName}
-                    onChange={(e) => setNewCashierName(e.target.value)}
+                    onChange={(e) => setNewCashierName(sanitizeFullNameInput(e.target.value))}
                     placeholder="Kasiyer adı"
                     className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm"
                   />
@@ -2235,8 +2282,9 @@ export function MerchantPanel() {
                         type="tel"
                         inputMode="tel"
                         value={newCashierPhone}
-                        onChange={(e) => setNewCashierPhone(e.target.value.replace(/[^0-9+]/g, ''))}
-                        placeholder="05XX XXX XX XX"
+                        onChange={(e) => setNewCashierPhone(normalizePhoneInput(e.target.value))}
+                        maxLength={PHONE_LENGTH}
+                        placeholder="05073376385"
                         className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm"
                       />
                     </div>

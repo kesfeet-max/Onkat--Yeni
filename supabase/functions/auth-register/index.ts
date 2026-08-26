@@ -23,6 +23,57 @@ interface RegisterRequest {
   terms_approved?: boolean;
 }
 
+/** Telefon numarasını "0XXXXXXXXXX" (11 hane) formatına normalize eder. */
+function normalizePhone(raw: string): string {
+  let digits = (raw || '').replace(/\D/g, '');
+  if (!digits) return '';
+
+  if (digits.startsWith('0090')) {
+    digits = digits.slice(4);
+  } else if (digits.startsWith('90') && digits.length > 11) {
+    digits = digits.slice(2);
+  }
+
+  digits = digits.replace(/^0+/, '0');
+
+  if (!digits.startsWith('0')) {
+    digits = `0${digits}`;
+  }
+
+  return digits.slice(0, 11);
+}
+
+/** Telefon numarasının geçerliliği: başında 0, toplam 11 hane. */
+function isValidPhone(value: string): boolean {
+  return /^0[1-9][0-9]{9}$/.test(value);
+}
+
+/** Girdinin e-posta ya da e-posta benzeri olup olmadığını tespit eder. */
+function looksLikeEmail(value: string): boolean {
+  const text = (value || '').trim();
+  if (!text) return false;
+  if (text.includes('@')) return true;
+  if (/\(\s*at\s*\)|\[\s*at\s*\]/i.test(text)) return true;
+  if (/(gmail|hotmail|outlook|yahoo|icloud|yandex|mynet|proton|windowslive)/i.test(text)) return true;
+  if (/\.(com|net|org|edu|gov|info|io|co|tr|de|nl)\b/i.test(text)) return true;
+  return false;
+}
+
+/** Ad Soyad alanının geçerliliği: e-posta olamaz, rakam/geçersiz karakter içeremez. */
+function isValidFullName(value: string): boolean {
+  const text = (value || '').trim().replace(/\s+/g, ' ');
+  if (!text) return false;
+  if (looksLikeEmail(text)) return false;
+  if (/\d/.test(text)) return false;
+  if (!/^[A-Za-zÇĞİÖŞÜçğıöşü\s'’.-]+$/.test(text)) return false;
+  if (text.replace(/[^A-Za-zÇĞİÖŞÜçğıöşü]/g, '').length < 3) return false;
+
+  const parts = text
+    .split(' ')
+    .filter((part) => part.replace(/[^A-Za-zÇĞİÖŞÜçğıöşü]/g, '').length >= 2);
+  return parts.length >= 2;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
@@ -65,7 +116,7 @@ Deno.serve(async (req: Request) => {
       || 'unknown';
 
     // Validate required fields - check for empty/whitespace strings
-    const trimmedFullName = (full_name || '').trim();
+    const trimmedFullName = (full_name || '').trim().replace(/\s+/g, ' ');
     const trimmedEmail = (email || '').trim().toLowerCase();
     const trimmedPhone = (phone || '').trim();
     const trimmedPassword = password || '';
@@ -84,10 +135,17 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // Validate phone - remove non-digits
-    const cleanedPhone = trimmedPhone.replace(/\D/g, '');
-    if (cleanedPhone.length < 10 || cleanedPhone.length > 11) {
-      return new Response(JSON.stringify({ error: "Geçersiz telefon numarası. 10 veya 11 haneli olmalı." }), {
+    // Ad Soyad doğrulaması — e-posta/mail benzeri veya geçersiz girdiler reddedilir
+    if (!isValidFullName(trimmedFullName)) {
+      return new Response(JSON.stringify({ error: "Lütfen geçerli bir ad ve soyad giriniz. Ad Soyad alanına e-posta adresi yazılamaz." }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Telefon doğrulaması — 0'sız girilse bile normalize edilir, sonuç 11 hane olmalı
+    const cleanedPhone = normalizePhone(trimmedPhone);
+    if (!isValidPhone(cleanedPhone)) {
+      return new Response(JSON.stringify({ error: "Telefon numarası, başında 0 olacak şekilde 11 haneli olmalıdır. Örn: 05073376385" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }

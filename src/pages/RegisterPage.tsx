@@ -14,7 +14,15 @@ import {
   EyeOff,
   CheckCircle,
 } from 'lucide-react';
-import { cleanPhoneNumber, getCurrentLocation } from '../lib/utils';
+import { getCurrentLocation } from '../lib/utils';
+import {
+  PHONE_LENGTH,
+  normalizePhoneInput,
+  normalizeFullName,
+  sanitizeFullNameInput,
+  validateFullName,
+  validatePhone,
+} from '../lib/validation';
 import type { UserRole } from '../types';
 
 export function RegisterPage() {
@@ -30,6 +38,37 @@ export function RegisterPage() {
 
   const [kvkkApproved, setKvkkApproved] = useState(false);
   const [termsApproved, setTermsApproved] = useState(false);
+
+  // Anlık alan doğrulama mesajları
+  const [nameError, setNameError] = useState<string | null>(null);
+  const [phoneError, setPhoneError] = useState<string | null>(null);
+
+  /** Ad Soyad: "@" ve rakam gibi geçersiz karakterler input'a hiç yazılamaz. */
+  const handleFullNameChange = (rawValue: string) => {
+    const sanitized = sanitizeFullNameInput(rawValue);
+    setFormData((prev) => ({ ...prev, full_name: sanitized }));
+
+    // Kullanıcı e-posta yazmayı denerse anında uyarı ver
+    if (rawValue !== sanitized || sanitized.trim().length > 0) {
+      const result = validateFullName(sanitized);
+      setNameError(result.valid ? null : result.message ?? null);
+    } else {
+      setNameError(null);
+    }
+  };
+
+  /** Telefon: baştaki 0 otomatik eklenir, en fazla 11 hane girilebilir. */
+  const handlePhoneChange = (rawValue: string) => {
+    const normalized = normalizePhoneInput(rawValue);
+    setFormData((prev) => ({ ...prev, phone: normalized }));
+
+    if (!normalized) {
+      setPhoneError(null);
+      return;
+    }
+    const result = validatePhone(normalized);
+    setPhoneError(result.valid ? null : result.message ?? null);
+  };
 
   const [formData, setFormData] = useState({
     phone: '',
@@ -69,10 +108,29 @@ export function RegisterPage() {
       return;
     }
 
+    // Ad Soyad doğrulaması — e-posta adresi girilmesi engellenir
+    const nameResult = validateFullName(formData.full_name);
+    if (!nameResult.valid) {
+      setNameError(nameResult.message ?? null);
+      setError(nameResult.message ?? null);
+      return;
+    }
+    setNameError(null);
+
+    // Telefon doğrulaması — başında 0 ile tam 11 hane zorunlu
+    const phoneResult = validatePhone(formData.phone);
+    if (!phoneResult.valid) {
+      setPhoneError(phoneResult.message ?? null);
+      setError(phoneResult.message ?? null);
+      return;
+    }
+    setPhoneError(null);
+
     setLoading(true);
 
     try {
-      const cleanedPhone = cleanPhoneNumber(formData.phone);
+      const cleanedPhone = normalizePhoneInput(formData.phone);
+      const cleanedFullName = normalizeFullName(formData.full_name);
 
       const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/auth-register`;
       const response = await fetch(apiUrl, {
@@ -85,7 +143,7 @@ export function RegisterPage() {
           phone: cleanedPhone,
           email: formData.email,
           password: formData.password,
-          full_name: formData.full_name,
+          full_name: cleanedFullName,
           store_name: formData.store_name || undefined,
           city: formData.city || undefined,
           district: formData.district || undefined,
@@ -186,13 +244,26 @@ export function RegisterPage() {
                 <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
                 <input
                   type="text"
+                  inputMode="text"
+                  autoComplete="name"
                   value={formData.full_name}
-                  onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
+                  onChange={(e) => handleFullNameChange(e.target.value)}
                   required
-                  className="w-full pl-12 pr-4 py-3 rounded-xl border-2 border-gray-300 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-gray-900"
+                  className={`w-full pl-12 pr-4 py-3 rounded-xl border-2 bg-white focus:ring-2 transition-all text-gray-900 ${
+                    nameError
+                      ? 'border-red-400 focus:ring-red-400 focus:border-red-400'
+                      : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'
+                  }`}
                   placeholder="Adınızı ve soyadınızı girin"
                 />
               </div>
+              {nameError ? (
+                <p className="text-xs text-red-600 mt-2 font-semibold">{nameError}</p>
+              ) : (
+                <p className="text-xs text-gray-600 mt-2 font-medium">
+                  E-posta adresi değil, ad ve soyadınızı yazın
+                </p>
+              )}
             </div>
 
             {/* Telefon */}
@@ -204,13 +275,27 @@ export function RegisterPage() {
                 <Phone className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
                 <input
                   type="tel"
+                  inputMode="numeric"
+                  autoComplete="tel"
+                  maxLength={PHONE_LENGTH}
                   value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                  onChange={(e) => handlePhoneChange(e.target.value)}
                   required
-                  className="w-full pl-12 pr-4 py-3 rounded-xl border-2 border-gray-300 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-gray-900"
-                  placeholder="05XX XXX XX XX"
+                  className={`w-full pl-12 pr-4 py-3 rounded-xl border-2 bg-white focus:ring-2 transition-all text-gray-900 tracking-wide ${
+                    phoneError
+                      ? 'border-red-400 focus:ring-red-400 focus:border-red-400'
+                      : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'
+                  }`}
+                  placeholder="05073376385"
                 />
               </div>
+              {phoneError ? (
+                <p className="text-xs text-red-600 mt-2 font-semibold">{phoneError}</p>
+              ) : (
+                <p className="text-xs text-gray-600 mt-2 font-medium">
+                  Başında 0 olacak şekilde 11 hane (Örn: 05073376385)
+                </p>
+              )}
             </div>
 
             {/* E-posta */}
