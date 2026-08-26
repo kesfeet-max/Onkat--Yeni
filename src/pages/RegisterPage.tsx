@@ -286,14 +286,14 @@ export function RegisterPage() {
                       ? 'border-red-400 focus:ring-red-400 focus:border-red-400'
                       : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'
                   }`}
-                  placeholder="05073376385"
+                  placeholder="05074445588"
                 />
               </div>
               {phoneError ? (
                 <p className="text-xs text-red-600 mt-2 font-semibold">{phoneError}</p>
               ) : (
                 <p className="text-xs text-gray-600 mt-2 font-medium">
-                  Başında 0 olacak şekilde 11 hane (Örn: 05073376385)
+                  Başında 0 olacak şekilde 11 hane (Örn: 05074445588)
                 </p>
               )}
             </div>

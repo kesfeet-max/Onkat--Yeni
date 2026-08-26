@@ -4,7 +4,7 @@
  * Kurallar:
  * 1. Ad Soyad alanına e-posta adresi (veya "@" içeren, e-posta benzeri) girdi yazılamaz.
  * 2. Telefon numarası her zaman başında 0 olacak şekilde, boşluksuz ve eksiksiz
- *    11 hane olmak zorundadır. Örn: 05073376385
+ *    11 hane olmak zorundadır. Örn: 05074445588
  *
  * Bu modül hem anlık (onChange) maskeleme hem de form submit doğrulaması için kullanılır.
  */
@@ -17,7 +17,7 @@ export const FULL_NAME_ERROR = 'Lütfen geçerli bir ad ve soyad giriniz.';
 
 /** Telefon alanı için kullanıcıya gösterilen standart uyarı. */
 export const PHONE_ERROR =
-  'Telefon numarası, başında 0 olacak şekilde 11 haneli olmalıdır. Örn: 05073376385';
+  'Telefon numarası, başında 0 olacak şekilde 11 haneli olmalıdır. Örn: 05074445588';
 
 export interface FieldValidation {
   valid: boolean;

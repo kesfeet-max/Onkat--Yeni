@@ -145,7 +145,7 @@ Deno.serve(async (req: Request) => {
     // Telefon doğrulaması — 0'sız girilse bile normalize edilir, sonuç 11 hane olmalı
     const cleanedPhone = normalizePhone(trimmedPhone);
     if (!isValidPhone(cleanedPhone)) {
-      return new Response(JSON.stringify({ error: "Telefon numarası, başında 0 olacak şekilde 11 haneli olmalıdır. Örn: 05073376385" }), {
+      return new Response(JSON.stringify({ error: "Telefon numarası, başında 0 olacak şekilde 11 haneli olmalıdır. Örn: 05074445588" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }

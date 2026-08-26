@@ -30,6 +30,14 @@ import {
 import { supabase } from '../lib/supabase';
 import { formatCurrency, formatDate } from '../lib/utils';
 import {
+  PHONE_LENGTH,
+  normalizePhoneInput,
+  validatePhone,
+  sanitizeFullNameInput,
+  normalizeFullName,
+  validateFullName,
+} from '../lib/validation';
+import {
   resolveMerchantSubscription,
   formatTrDate,
   formatTrShortDate,
@@ -131,6 +139,11 @@ export function AdminPanel() {
     longitude: 0,
   });
   const [saving, setSaving] = useState(false);
+  /** Müşteri bilgileri (Ad Soyad / Telefon) düzenleme modalı durumu */
+  const [editingCustomer, setEditingCustomer] = useState<CustomerData | null>(null);
+  const [customerForm, setCustomerForm] = useState({ full_name: '', phone: '' });
+  const [customerFormErrors, setCustomerFormErrors] = useState<{ full_name?: string; phone?: string }>({});
+  const [savingCustomer, setSavingCustomer] = useState(false);
   const [credForm, setCredForm] = useState({ email: '', password: '', confirmPassword: '' });
   const [credInfo, setCredInfo] = useState<{ email: string; last_sign_in_at: string | null } | null>(null);
   const [loadingCred, setLoadingCred] = useState(false);
@@ -222,6 +235,128 @@ export function AdminPanel() {
       console.error('Error fetching data:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  /** Müşteri düzenleme modalını, seçilen müşterinin mevcut bilgileriyle doldurarak açar. */
+  const openCustomerEdit = (customer: CustomerData) => {
+    setEditingCustomer(customer);
+    setCustomerForm({
+      full_name: normalizeFullName(customer.full_name || ''),
+      phone: normalizePhoneInput(customer.phone || ''),
+    });
+    setCustomerFormErrors({});
+  };
+
+  /** Müşteri düzenleme modalını kapatır ve form durumunu sıfırlar. */
+  const closeCustomerEdit = () => {
+    setEditingCustomer(null);
+    setCustomerForm({ full_name: '', phone: '' });
+    setCustomerFormErrors({});
+  };
+
+  /**
+   * Seçili müşterinin Ad Soyad ve Telefon Numarası bilgilerini günceller.
+   *
+   * Kurallar:
+   *  - Ad Soyad alanı e-posta / geçersiz karakter içeremez (validateFullName)
+   *  - Telefon numarası başında 0 olacak şekilde tam 11 hane olmalıdır (validatePhone)
+   *
+   * Yol sırası: 1) Edge Function (service_role, RLS'i aşar) 2) Doğrudan tablo güncellemesi.
+   * Hiçbiri satır güncellemezse kullanıcıya "başarılı" mesajı gösterilmez.
+   */
+  const saveCustomerInfo = async () => {
+    if (!editingCustomer) return;
+
+    const nameCheck = validateFullName(customerForm.full_name);
+    const phoneCheck = validatePhone(customerForm.phone);
+
+    if (!nameCheck.valid || !phoneCheck.valid) {
+      setCustomerFormErrors({ full_name: nameCheck.message, phone: phoneCheck.message });
+      return;
+    }
+
+    const fullName = normalizeFullName(customerForm.full_name);
+    const phone = normalizePhoneInput(customerForm.phone);
+    const customerId = editingCustomer.id;
+
+    /** Listeyi anında günceller, böylece tablo beklemeden yeni bilgileri gösterir. */
+    const applyLocal = () => {
+      setCustomers(prev =>
+        prev.map(c => (c.id === customerId ? { ...c, full_name: fullName, phone } : c))
+      );
+    };
+
+    setSavingCustomer(true);
+    setMessage(null);
+
+    try {
+      // 1) Edge Function yolu (service_role ile çalışır, RLS'i aşar)
+      const { data: { session } } = await supabase.auth.getSession();
+      let edgeError: string | null = null;
+
+      if (session) {
+        try {
+          const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-data`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              action: 'update_customer',
+              id: customerId,
+              full_name: fullName,
+              phone,
+            }),
+          });
+          const json = await response.json().catch(() => ({}));
+
+          if (response.ok && json?.success) {
+            applyLocal();
+            setMessage({ type: 'success', text: 'Müşteri bilgileri başarıyla güncellendi' });
+            closeCustomerEdit();
+            fetchData();
+            return;
+          }
+
+          if (typeof json?.error === 'string') {
+            edgeError = json.error;
+          }
+        } catch {
+          // Edge Function erişilemedi; doğrudan güncelleme denenecek
+        }
+      }
+
+      // 2) Doğrudan tablo güncellemesi — etkilenen satır sayısı doğrulanır
+      const { data: updated, error } = await supabase
+        .from('customers')
+        .update({ full_name: fullName, phone, updated_at: new Date().toISOString() })
+        .eq('id', customerId)
+        .select('id');
+
+      if (!error && updated && updated.length > 0) {
+        applyLocal();
+        setMessage({ type: 'success', text: 'Müşteri bilgileri başarıyla güncellendi' });
+        closeCustomerEdit();
+        fetchData();
+        return;
+      }
+
+      setMessage({
+        type: 'error',
+        text:
+          edgeError ||
+          error?.message ||
+          'Müşteri bilgileri güncellenemedi. Lütfen bilgileri kontrol edip tekrar deneyin.',
+      });
+    } catch (err) {
+      setMessage({
+        type: 'error',
+        text: err instanceof Error ? err.message : 'Beklenmeyen bir hata oluştu',
+      });
+    } finally {
+      setSavingCustomer(false);
     }
   };
 
@@ -1018,18 +1153,123 @@ export function AdminPanel() {
                           </td>
                           <td className="px-4 py-3 text-sm text-gray-500">{formatDate(customer.created_at)}</td>
                           <td className="px-4 py-3">
-                            <button
-                              onClick={() => toggleUserStatus('customers', customer.id, customer.is_active)}
-                              className="text-gray-400 hover:text-primary-600 transition-colors"
-                              title={customer.is_active ? 'Pasif Yap' : 'Aktif Yap'}
-                            >
-                              {customer.is_active ? <X className="w-4 h-4" /> : <CheckCircle className="w-4 h-4" />}
-                            </button>
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => openCustomerEdit(customer)}
+                                className="p-1.5 rounded-lg text-gray-400 hover:text-primary-600 hover:bg-primary-50 transition-colors"
+                                title="Bilgileri Düzenle"
+                              >
+                                <Edit className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => toggleUserStatus('customers', customer.id, customer.is_active)}
+                                className="p-1.5 rounded-lg text-gray-400 hover:text-primary-600 hover:bg-gray-100 transition-colors"
+                                title={customer.is_active ? 'Pasif Yap' : 'Aktif Yap'}
+                              >
+                                {customer.is_active ? <X className="w-4 h-4" /> : <CheckCircle className="w-4 h-4" />}
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                </div>
+              </div>
+            )}
+
+            {/* Müşteri Bilgileri Düzenleme Modalı */}
+            {editingCustomer && (
+              <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4">
+                <div className="w-full sm:max-w-md bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl max-h-[92vh] overflow-y-auto">
+                  <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-gray-100">
+                    <div>
+                      <h3 className="font-heading font-bold text-gray-900">Müşteri Bilgilerini Düzenle</h3>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {editingCustomer.email || 'E-posta kayıtlı değil'}
+                      </p>
+                    </div>
+                    <button
+                      onClick={closeCustomerEdit}
+                      className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition"
+                      title="Kapat"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  <div className="p-5 space-y-4">
+                    {/* Ad Soyad */}
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1.5">Ad Soyad</label>
+                      <input
+                        type="text"
+                        value={customerForm.full_name}
+                        onChange={(e) => {
+                          setCustomerForm(prev => ({ ...prev, full_name: sanitizeFullNameInput(e.target.value) }));
+                          setCustomerFormErrors(prev => ({ ...prev, full_name: undefined }));
+                        }}
+                        placeholder="Ad Soyad"
+                        autoComplete="off"
+                        className={`w-full px-4 py-3 rounded-xl border text-sm transition focus:ring-2 ${
+                          customerFormErrors.full_name
+                            ? 'border-red-400 focus:ring-red-400 focus:border-red-400'
+                            : 'border-gray-200 focus:ring-primary-500 focus:border-primary-500'
+                        }`}
+                      />
+                      {customerFormErrors.full_name ? (
+                        <p className="text-xs text-red-600 mt-1.5 font-medium">{customerFormErrors.full_name}</p>
+                      ) : (
+                        <p className="text-xs text-gray-400 mt-1.5">E-posta adresi değil, ad ve soyad yazın</p>
+                      )}
+                    </div>
+
+                    {/* Telefon Numarası */}
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1.5">Telefon Numarası</label>
+                      <input
+                        type="tel"
+                        inputMode="numeric"
+                        maxLength={PHONE_LENGTH}
+                        value={customerForm.phone}
+                        onChange={(e) => {
+                          setCustomerForm(prev => ({ ...prev, phone: normalizePhoneInput(e.target.value) }));
+                          setCustomerFormErrors(prev => ({ ...prev, phone: undefined }));
+                        }}
+                        placeholder="05074445588"
+                        className={`w-full px-4 py-3 rounded-xl border text-sm tracking-wide transition focus:ring-2 ${
+                          customerFormErrors.phone
+                            ? 'border-red-400 focus:ring-red-400 focus:border-red-400'
+                            : 'border-gray-200 focus:ring-primary-500 focus:border-primary-500'
+                        }`}
+                      />
+                      {customerFormErrors.phone ? (
+                        <p className="text-xs text-red-600 mt-1.5 font-medium">{customerFormErrors.phone}</p>
+                      ) : (
+                        <p className="text-xs text-gray-400 mt-1.5">
+                          Başında 0 olacak şekilde 11 hane (Örn: 05074445588)
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 px-5 pb-5">
+                    <button
+                      onClick={closeCustomerEdit}
+                      disabled={savingCustomer}
+                      className="px-4 py-3 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition"
+                    >
+                      İptal
+                    </button>
+                    <button
+                      onClick={saveCustomerInfo}
+                      disabled={savingCustomer}
+                      className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-primary-600 text-white text-sm font-semibold hover:bg-primary-700 disabled:opacity-60 disabled:cursor-not-allowed transition"
+                    >
+                      {savingCustomer ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                      Güncellenmiş Bilgileri Uygula
+                    </button>
+                  </div>
                 </div>
               </div>
             )}

@@ -13,7 +13,7 @@
 BEGIN;
 
 -- ---------------------------------------------------------------------------
--- Telefon normalizasyonu: "+90 507 337 63 85" / "5073376385" -> "05073376385"
+-- Telefon normalizasyonu: "+90 507 444 55 88" / "5074445588" -> "05074445588"
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.onkati_normalize_phone(p_phone text)
 RETURNS text
@@ -179,7 +179,7 @@ BEGIN
 
     IF NOT public.onkati_is_valid_phone(NEW.phone) THEN
       RAISE EXCEPTION
-        'Gecersiz telefon numarasi. Telefon numarasi basinda 0 olacak sekilde 11 haneli olmalidir. Ornek: 05073376385';
+        'Gecersiz telefon numarasi. Telefon numarasi basinda 0 olacak sekilde 11 haneli olmalidir. Ornek: 05074445588';
     END IF;
   END IF;
 

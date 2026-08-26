@@ -1908,7 +1908,7 @@ export function MerchantPanel() {
                       type="tel"
                       value={profileForm.phone}
                       onChange={(e) => setProfileForm(prev => ({ ...prev, phone: normalizePhoneInput(e.target.value) }))}
-                      placeholder="05073376385"
+                      placeholder="05074445588"
                       inputMode="numeric"
                       maxLength={PHONE_LENGTH}
                       className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm transition tracking-wide"
@@ -2284,7 +2284,7 @@ export function MerchantPanel() {
                         value={newCashierPhone}
                         onChange={(e) => setNewCashierPhone(normalizePhoneInput(e.target.value))}
                         maxLength={PHONE_LENGTH}
-                        placeholder="05073376385"
+                        placeholder="05074445588"
                         className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm"
                       />
                     </div>

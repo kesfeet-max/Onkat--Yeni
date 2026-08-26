@@ -281,6 +281,102 @@ Deno.serve(async (req: Request) => {
         });
       }
 
+      // Musterinin Ad Soyad / Telefon bilgilerini guncelle
+      if (postAction === 'update_customer') {
+        const { id, full_name, phone } = body;
+
+        if (!id) {
+          return new Response(JSON.stringify({ error: 'Musteri id gerekli' }), {
+            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        // ---------- Ad Soyad dogrulamasi ----------
+        const cleanName = typeof full_name === 'string' ? full_name.trim().replace(/\s+/g, ' ') : '';
+        const namePattern = /^[A-Za-zÇĞİÖŞÜçğıöşü\s'’.-]+$/;
+        const emailLike =
+          cleanName.includes('@') ||
+          /(gmail|hotmail|outlook|yahoo|icloud|yandex|mynet|proton)/i.test(cleanName) ||
+          /\.(com|net|org|edu|gov|info|io|co|tr|de|nl)\b/i.test(cleanName);
+        const nameParts = cleanName.split(' ').filter((part: string) => part.length >= 2);
+
+        if (!cleanName || emailLike || !namePattern.test(cleanName) || nameParts.length < 2) {
+          return new Response(JSON.stringify({
+            error: 'Lutfen gecerli bir ad ve soyad giriniz. Ad Soyad alanina e-posta adresi yazilamaz.',
+          }), {
+            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        // ---------- Telefon normalizasyonu ve dogrulamasi ----------
+        let digits = (typeof phone === 'string' ? phone : '').replace(/\D/g, '');
+        if (digits.startsWith('0090')) {
+          digits = digits.slice(4);
+        } else if (digits.startsWith('90') && digits.length > 11) {
+          digits = digits.slice(2);
+        }
+        digits = digits.replace(/^0+/, '0');
+        if (digits && !digits.startsWith('0')) digits = '0' + digits;
+        digits = digits.slice(0, 11);
+
+        if (digits.length !== 11 || !digits.startsWith('0') || digits[1] === '0') {
+          return new Response(JSON.stringify({
+            error: 'Telefon numarasi, basinda 0 olacak sekilde 11 haneli olmalidir. Orn: 05074445588',
+          }), {
+            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        // Ayni telefon numarasi baska bir musteride kayitli olmamali
+        const { data: duplicates } = await supabase
+          .from('customers')
+          .select('id')
+          .eq('phone', digits)
+          .neq('id', id)
+          .limit(1);
+
+        if (duplicates && duplicates.length > 0) {
+          return new Response(JSON.stringify({ error: 'Bu telefon numarasi baska bir musteriye ait' }), {
+            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        const { data: updatedCustomer, error: customerUpdateError } = await supabase
+          .from('customers')
+          .update({ full_name: cleanName, phone: digits, updated_at: new Date().toISOString() })
+          .eq('id', id)
+          .select('id, user_id, full_name, phone');
+
+        if (customerUpdateError) throw customerUpdateError;
+
+        if (!updatedCustomer || updatedCustomer.length === 0) {
+          return new Response(JSON.stringify({ error: 'Musteri bulunamadi' }), {
+            status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        // profiles tablosundaki kaydi da senkronize et (tablo/kolon yoksa sessizce gecilir)
+        const targetUserId = updatedCustomer[0].user_id;
+        if (targetUserId) {
+          await supabase.from('profiles')
+            .update({ full_name: cleanName, phone: digits })
+            .eq('user_id', targetUserId);
+        }
+
+        // Islem kaydi (tablo yoksa sessizce gecilir)
+        await supabase.from('admin_action_logs').insert({
+          admin_id: admin?.id ?? null,
+          admin_email: admin?.email ?? null,
+          target_user_id: targetUserId ?? null,
+          action: 'customer_info_update',
+          created_at: new Date().toISOString(),
+        });
+
+        return new Response(JSON.stringify({ success: true, customer: updatedCustomer[0] }), {
+          status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
       // Esnafin gercek giris (auth) e-postasini getir
       if (postAction === 'get_merchant_credentials') {
         const { user_id } = body;
