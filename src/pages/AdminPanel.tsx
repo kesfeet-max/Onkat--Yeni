@@ -43,6 +43,7 @@ import {
   formatTrShortDate,
   computeExtendedPaidUntil,
 } from '../lib/subscription';
+import { ADMIN_LOGIN_PATH } from '../lib/admin-routes';
 
 interface AdminData {
   id: string;
@@ -170,7 +171,7 @@ export function AdminPanel() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
-        navigate('/admin-giris');
+        navigate(ADMIN_LOGIN_PATH);
         return;
       }
 
@@ -182,13 +183,13 @@ export function AdminPanel() {
 
       if (error || !adminData) {
         setMessage({ type: 'error', text: 'Admin yetkiniz yok' });
-        setTimeout(() => navigate('/admin-giris'), 2000);
+        setTimeout(() => navigate(ADMIN_LOGIN_PATH), 2000);
         return;
       }
 
       setAdmin(adminData);
     } catch (err) {
-      navigate('/admin-giris');
+      navigate(ADMIN_LOGIN_PATH);
     }
   };
 

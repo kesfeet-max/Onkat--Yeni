@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Mail, Lock, AlertCircle, Shield, ArrowLeft } from 'lucide-react';
 import { BrandLogo } from '../components/BrandLogo';
 import { supabase } from '../lib/supabase';
+import { ADMIN_PANEL_PATH } from '../lib/admin-routes';
 
 export function AdminLoginPage() {
   const [email, setEmail] = useState('');
@@ -21,7 +22,7 @@ export function AdminLoginPage() {
           .eq('user_id', session.user.id)
           .maybeSingle();
         if (adminData) {
-          navigate('/admin');
+          navigate(ADMIN_PANEL_PATH);
         }
       }
     };
@@ -76,7 +77,7 @@ export function AdminLoginPage() {
           return;
         }
 
-        navigate('/admin');
+        navigate(ADMIN_PANEL_PATH);
       }
     } catch (err) {
       setError('Giriş sırasında bir hata oluştu');

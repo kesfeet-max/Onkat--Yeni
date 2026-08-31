@@ -54,6 +54,7 @@ import { SubscriptionTab } from '../components/SubscriptionTab';
 import { BrandLogo } from '../components/BrandLogo';
 import { scrollWindowToTop } from '../components/ScrollToTop';
 import { resolveMerchantSubscription, buildStoreCode } from '../lib/subscription';
+import { StorePosterSection } from '../components/StorePosterSection';
 import {
   PHONE_LENGTH,
   normalizePhoneInput,
@@ -2535,6 +2536,12 @@ export function MerchantPanel() {
                 <strong>Not:</strong> Puan oranları 1-25 arasında olmalıdır. Nakit ödemeler genellikle daha yüksek oran alır.
               </p>
             </div>
+
+            {/* Kasa Afişim ve QR Kodum — hazır afiş ön izleme, boyut seçimi ve yazdırma */}
+            <StorePosterSection
+              storeCode={merchantStoreCode}
+              storeName={merchant?.store_name}
+            />
           </div>
             )}
 
