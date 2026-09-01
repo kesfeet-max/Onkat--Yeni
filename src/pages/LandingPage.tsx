@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { PwaInstallBanner } from '../components/PwaInstallBanner';
+import { PricingSection } from '../components/PricingSection';
 import { BrandLogo } from '../components/BrandLogo';
 import {
   TrendingUp,
@@ -64,6 +65,8 @@ export function LandingPage() {
       <WhyOnkatiSection />
       <AboutSection />
       <HowItWorksSection />
+      {/* Esnafa özel kademeli lansman fiyatlandırması ve kayıt CTA'sı */}
+      <PricingSection />
       <FAQSection />
       <ContactSection />
       <PwaInstallBanner variant="customer" />
