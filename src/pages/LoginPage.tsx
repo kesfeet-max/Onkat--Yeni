@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Phone, Lock, AlertCircle, Mail, X, CheckCircle } from 'lucide-react';
 import { BrandLogo } from '../components/BrandLogo';
+import { GoogleAuthButton } from '../components/GoogleAuthButton';
 import { useAuth } from '../auth/AuthContext';
 import { supabase } from '../lib/supabase';
 
@@ -91,6 +92,9 @@ export function LoginPage() {
               <span className="text-sm">{error}</span>
             </div>
           )}
+
+          {/* Google ile hızlı giriş — mevcut telefon/şifre formu aynen korunur */}
+          <GoogleAuthButton helperText="Esnaf ve müşteriler için geçerlidir" />
 
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>

@@ -10,6 +10,7 @@ interface AuthContextType {
   error: string | null;
   signInWithPhone: (phone: string, password: string) => Promise<{ error?: string }>;
   signInWithEmail: (email: string, password: string) => Promise<{ error?: string }>;
+  signInWithGoogle: (role?: UserRole) => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
@@ -405,6 +406,54 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [fetchProfile]);
 
+  /**
+   * Google (OAuth) ile giriş / kayıt akışını başlatır.
+   *
+   * Mevcut e-posta+şifre akışına dokunmaz; alternatif bir yol sunar.
+   * Kullanıcı Google onayından sonra `/google-tamamla` adresine döner.
+   * Profil (müşteri/esnaf) yoksa o sayfada eksik bilgiler tamamlanır,
+   * profil varsa doğrudan `/panel` adresine yönlendirilir.
+   *
+   * @param role Kullanıcının bulunduğu ekrandaki rol tercihi (müşteri/esnaf).
+   */
+  const signInWithGoogle = useCallback(async (role?: UserRole) => {
+    setError(null);
+
+    try {
+      // Rol tercihi OAuth yönlendirmesi boyunca korunur (redirect state kaybolabilir)
+      if (role) {
+        try {
+          localStorage.setItem('onkati-oauth-role', role);
+        } catch {
+          // localStorage erişilemezse rol seçimi tamamlama ekranında istenir
+        }
+      }
+
+      const redirectTo = `${window.location.origin}/google-tamamla`;
+
+      const { error: oauthError } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo,
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'select_account',
+          },
+        },
+      });
+
+      if (oauthError) {
+        console.error('signInWithGoogle error:', oauthError);
+        return { error: 'Google ile giriş başlatılamadı. Lütfen tekrar deneyin.' };
+      }
+
+      return {};
+    } catch (err) {
+      console.error('signInWithGoogle unexpected error:', err);
+      return { error: 'Google ile giriş sırasında bir hata oluştu.' };
+    }
+  }, []);
+
   const refreshProfile = useCallback(async () => {
     if (user?.id) {
       const userProfile = await fetchProfile(user.id);
@@ -413,7 +462,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [user, fetchProfile]);
 
   return (
-    <AuthContext.Provider value={{ user, profile, userRole, loading, error, signInWithPhone, signInWithEmail, signOut, refreshProfile }}>
+    <AuthContext.Provider value={{ user, profile, userRole, loading, error, signInWithPhone, signInWithEmail, signInWithGoogle, signOut, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );

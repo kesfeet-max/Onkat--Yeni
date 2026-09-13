@@ -11,6 +11,7 @@ import { Dashboard } from './pages/Dashboard';
 import { AdminPanel } from './pages/AdminPanel';
 import { AdminLoginPage } from './pages/AdminLoginPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
+import { GoogleCompletePage } from './pages/GoogleCompletePage';
 import { QRTestPage } from './pages/QRTestPage';
 import { StorePage } from './pages/StorePage';
 import { KVKKPage } from './pages/KVKKPage';
@@ -34,6 +35,8 @@ function App() {
               <Route path="/giris" element={<LoginPage />} />
               <Route path="/kayit" element={<RegisterPage />} />
               <Route path="/reset-password" element={<ResetPasswordPage />} />
+              {/* Google OAuth dönüş adresi — profil eksikse tamamlama formu gösterilir */}
+              <Route path="/google-tamamla" element={<GoogleCompletePage />} />
               <Route path="/panel" element={<Dashboard />} />
               <Route path="/islem" element={<Dashboard />} />
               {/*
