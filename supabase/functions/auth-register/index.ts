@@ -102,12 +102,8 @@ Deno.serve(async (req: Request) => {
 
     const { role, phone, email, password, full_name, store_name, city, district, sector, latitude, longitude, kvkk_approved, terms_approved } = body;
 
-    // Yasal onay kontrolü — her iki kutucuk da işaretlenmiş olmalı
-    if (!kvkk_approved || !terms_approved) {
-      return new Response(JSON.stringify({ error: "KVKK Aydınlatma Metni ve Müşteri Üyelik Koşulları onaylanmadan kayıt yapılamaz." }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    // Yasal onay artık zorunlu bir onay kutusu değildir; kayıt akışı sürtünmesizdir.
+    // Onay bilgisi yalnızca kayıt amacıyla loglanır, eksik olsa dahi kayıt engellenmez.
 
     // IP adresini al (yasal kayıt için)
     const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() 

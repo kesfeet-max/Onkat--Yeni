@@ -37,8 +37,11 @@ export function RegisterPage() {
   const [isLocating, setIsLocating] = useState(false);
   const navigate = useNavigate();
 
-  const [kvkkApproved, setKvkkApproved] = useState(false);
-  const [termsApproved, setTermsApproved] = useState(false);
+  /**
+   * Yasal metinler artık zorunlu onay kutusu ile istenmez.
+   * Kayıt akışı sürtünmesiz olacak şekilde zımni onay kabul edilir;
+   * metinler yalnızca bilgilendirme bağlantısı olarak gösterilir.
+   */
 
   // Anlık alan doğrulama mesajları
   const [nameError, setNameError] = useState<string | null>(null);
@@ -104,11 +107,6 @@ export function RegisterPage() {
     e.preventDefault();
     setError(null);
 
-    if (!kvkkApproved || !termsApproved) {
-      setError('Devam etmek için KVKK Aydınlatma Metni ve Üyelik Koşullarını onaylamanız gerekmektedir.');
-      return;
-    }
-
     // Ad Soyad doğrulaması — e-posta adresi girilmesi engellenir
     const nameResult = validateFullName(formData.full_name);
     if (!nameResult.valid) {
@@ -151,8 +149,9 @@ export function RegisterPage() {
           sector: formData.sector || undefined,
           latitude: formData.latitude || undefined,
           longitude: formData.longitude || undefined,
-          kvkk_approved: kvkkApproved,
-          terms_approved: termsApproved,
+          // Zımni onay: kullanıcıya ayrı bir onay ekranı gösterilmez
+          kvkk_approved: true,
+          terms_approved: true,
         }),
       });
 
@@ -235,15 +234,11 @@ export function RegisterPage() {
             </div>
           )}
 
-          {/* Google ile hızlı kayıt — mevcut form alanları aynen korunur */}
+          {/* Google ile tek tıkla kayıt — ek form veya onay adımı yoktur */}
           <GoogleAuthButton
             role={role}
             label="Google ile Devam Et"
-            helperText={
-              role === 'merchant'
-                ? 'Google ile devam ederken dükkan bilgileri sonraki adımda istenir'
-                : 'Google ile devam ederken telefon bilgisi sonraki adımda istenir'
-            }
+            helperText="Tek tıkla kayıt olun, ek bilgi istenmez"
           />
 
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
@@ -442,54 +437,32 @@ export function RegisterPage() {
               </>
             )}
 
-            {/* Yasal Onay Kutuları */}
-            <div className="space-y-3 bg-gray-50 p-4 rounded-xl border border-gray-200">
-              <label className="flex items-start gap-3 cursor-pointer group">
-                <input
-                  type="checkbox"
-                  checked={kvkkApproved}
-                  onChange={(e) => setKvkkApproved(e.target.checked)}
-                  required
-                  className="mt-1 w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 flex-shrink-0"
-                />
-                <span className="text-sm text-gray-700 leading-relaxed">
-                  <a
-                    href="/yasal/kvkk"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-primary-600 font-semibold hover:text-primary-700 underline"
-                  >
-                    KVKK Aydınlatma Metni
-                  </a>
-                  'ni okudum ve onaylıyorum. <span className="text-red-500">*</span>
-                </span>
-              </label>
-
-              <label className="flex items-start gap-3 cursor-pointer group">
-                <input
-                  type="checkbox"
-                  checked={termsApproved}
-                  onChange={(e) => setTermsApproved(e.target.checked)}
-                  required
-                  className="mt-1 w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 flex-shrink-0"
-                />
-                <span className="text-sm text-gray-700 leading-relaxed">
-                  <a
-                    href={role === 'merchant' ? "/yasal/esnaf-kosullari" : "/yasal/musteri-kosullari"}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-primary-600 font-semibold hover:text-primary-700 underline"
-                  >
-                    {role === 'merchant' ? 'Esnaf Üyelik ve Hizmet Koşulları' : 'Müşteri Üyelik ve Hizmet Koşulları'}
-                  </a>
-                  'nı okudum ve kabul ediyorum. <span className="text-red-500">*</span>
-                </span>
-              </label>
-            </div>
+            {/* Bilgilendirme — zorunlu onay kutusu yoktur, kayıt engellenmez */}
+            <p className="text-[11px] sm:text-xs text-gray-500 leading-relaxed text-center px-1">
+              Kaydolarak{' '}
+              <a
+                href="/yasal/kvkk"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary-600 font-semibold hover:text-primary-700 underline"
+              >
+                KVKK Aydınlatma Metni
+              </a>{' '}
+              ve{' '}
+              <a
+                href={role === 'merchant' ? '/yasal/esnaf-kosullari' : '/yasal/musteri-kosullari'}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary-600 font-semibold hover:text-primary-700 underline"
+              >
+                {role === 'merchant' ? 'Esnaf Üyelik Koşulları' : 'Müşteri Üyelik Koşulları'}
+              </a>{' '}
+              hakkında bilgilendirildiğinizi kabul etmiş olursunuz.
+            </p>
 
             <button
               type="submit"
-              disabled={loading || (role === 'merchant' && !formData.latitude) || !kvkkApproved || !termsApproved}
+              disabled={loading || (role === 'merchant' && !formData.latitude)}
               className="w-full bg-primary-600 text-white py-4 rounded-xl font-semibold hover:bg-primary-700 transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {loading ? (
