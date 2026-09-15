@@ -81,6 +81,8 @@ interface MerchantData {
   total_revenue: number;
   total_points_distributed: number;
   total_customers: number;
+  /** Müşterilerin bu dükkanda harcadığı puan (gerçek işlemlerden hesaplanır). */
+  total_points_spent?: number;
   is_active: boolean;
   created_at: string;
   latitude?: number;
@@ -112,6 +114,115 @@ interface DetailStats {
   spent: number;
   customers: number;
   transactionCount: number;
+}
+
+/** Esnaf kimliği → gerçek işlemlerden hesaplanan özet eşlemesi. */
+type MerchantStatsMap = Record<
+  string,
+  { revenue: number; points: number; spent: number; customers: number }
+>;
+
+/**
+ * Tüm esnafların ciro / dağıtılan puan / harcanan puan / müşteri sayısı
+ * özetlerini getirir.
+ *
+ * `merchants` tablosundaki total_revenue, total_points_distributed ve
+ * total_customers kolonları işlem sırasında güncellenmediği için bu değerler
+ * her zaman gerçek "completed" işlemlerden hesaplanır.
+ *
+ * Yol sırası:
+ *   1) `admin_esnaf_istatistikleri` RPC'si (tüm hesap veritabanında yapılır)
+ *   2) Doğrudan `transactions` sorgusu + istemci tarafı hesaplama
+ *
+ * Her iki yol da başarısız olursa `null` döner ve mevcut değerlere dokunulmaz.
+ */
+async function fetchMerchantStatsMap(): Promise<MerchantStatsMap | null> {
+  // 1) Veritabanı RPC'si — Edge Function deploy edilmemiş olsa da çalışır
+  try {
+    const { data, error } = await supabase.rpc('admin_esnaf_istatistikleri');
+    const result = data as { success?: boolean; stats?: unknown } | null;
+
+    if (!error && result?.success && Array.isArray(result.stats)) {
+      const map: MerchantStatsMap = {};
+      (result.stats as Record<string, unknown>[]).forEach((row) => {
+        const id = String(row.merchant_id || '');
+        if (!id) return;
+        map[id] = {
+          revenue: Number(row.revenue) || 0,
+          points: Number(row.points) || 0,
+          spent: Number(row.spent) || 0,
+          customers: Number(row.customers) || 0,
+        };
+      });
+      return map;
+    }
+  } catch (err) {
+    console.warn('[AdminPanel] İstatistik RPC kullanılamadı:', err);
+  }
+
+  // 2) Doğrudan sorgu + istemci tarafı hesaplama
+  try {
+    const { data, error } = await supabase
+      .from('transactions')
+      .select('merchant_id, customer_id, amount, points, type')
+      .eq('status', 'completed')
+      .limit(20000);
+
+    if (error || !data) return null;
+
+    const map: MerchantStatsMap = {};
+    const customerSets: Record<string, Set<string>> = {};
+
+    (data as Record<string, unknown>[]).forEach((tx) => {
+      const merchantId = String(tx.merchant_id || '');
+      if (!merchantId) return;
+
+      if (!map[merchantId]) {
+        map[merchantId] = { revenue: 0, points: 0, spent: 0, customers: 0 };
+        customerSets[merchantId] = new Set<string>();
+      }
+
+      const customerId = String(tx.customer_id || '');
+      if (customerId) customerSets[merchantId].add(customerId);
+
+      if (tx.type === 'earn') {
+        map[merchantId].revenue += Number(tx.amount) || 0;
+        map[merchantId].points += Number(tx.points) || 0;
+      } else if (tx.type === 'spend') {
+        map[merchantId].spent += Number(tx.points) || 0;
+      }
+    });
+
+    Object.keys(map).forEach((id) => {
+      map[id].customers = customerSets[id]?.size || 0;
+    });
+
+    return map;
+  } catch (err) {
+    console.warn('[AdminPanel] İstatistik sorgusu başarısız:', err);
+    return null;
+  }
+}
+
+/**
+ * Esnaf listesine hesaplanan özetleri işler.
+ *
+ * Özet bulunamayan esnaf henüz hiç işlem yapmamış demektir; bu durumda
+ * değerler 0 olarak gösterilir (yanıltıcı eski kolon değeri kullanılmaz).
+ */
+function applyMerchantStats(list: MerchantData[], map: MerchantStatsMap | null): MerchantData[] {
+  if (!map) return list;
+
+  return list.map((merchant) => {
+    const stats = map[merchant.id];
+    return {
+      ...merchant,
+      total_revenue: stats ? stats.revenue : 0,
+      total_points_distributed: stats ? stats.points : 0,
+      total_customers: stats ? stats.customers : 0,
+      total_points_spent: stats ? stats.spent : 0,
+    };
+  });
 }
 
 export function AdminPanel() {
@@ -210,32 +321,106 @@ export function AdminPanel() {
         const data = await response.json();
         if (response.ok && data.success) {
           setStats(data.stats);
-          setMerchants(data.merchants || []);
           setCustomers(data.customers || []);
+          // Özetler her zaman gerçek işlemlerden yeniden hesaplanır
+          const statsMap = await fetchMerchantStatsMap();
+          setMerchants(applyMerchantStats((data.merchants || []) as MerchantData[], statsMap));
+          return;
         }
+        // Edge Function erişilemedi: doğrudan sorgu + RPC hesaplaması ile devam
+        await fetchDataFallback('overview');
       } else if (activeTab === 'customers') {
         const response = await fetch(`${apiUrl}?action=customers`, { headers });
         const data = await response.json();
         if (response.ok && data.success) {
           setCustomers(data.customers || []);
+          return;
         }
+        await fetchDataFallback('customers');
       } else if (activeTab === 'merchants') {
         const response = await fetch(`${apiUrl}?action=merchants`, { headers });
         const data = await response.json();
         if (response.ok && data.success) {
-          setMerchants(data.merchants || []);
+          const statsMap = await fetchMerchantStatsMap();
+          setMerchants(applyMerchantStats((data.merchants || []) as MerchantData[], statsMap));
+          return;
         }
+        await fetchDataFallback('merchants');
       } else if (activeTab === 'transactions') {
         const response = await fetch(`${apiUrl}?action=transactions`, { headers });
         const data = await response.json();
         if (response.ok && data.success) {
           setTransactions(data.transactions || []);
+          return;
         }
+        await fetchDataFallback('transactions');
       }
     } catch (err) {
       console.error('Error fetching data:', err);
+      // Ağ hatasında da panel boş kalmasın
+      try {
+        await fetchDataFallback(activeTab);
+      } catch (fallbackErr) {
+        console.error('Fallback fetch failed:', fallbackErr);
+      }
     } finally {
       setLoading(false);
+    }
+  };
+
+  /**
+   * Edge Function erişilemediğinde doğrudan veritabanı sorgularıyla veri getirir.
+   *
+   * Esnaf özetleri burada da gerçek işlemlerden hesaplanır; böylece admin paneli
+   * `admin-data` fonksiyonu deploy edilmemiş olsa bile doğru değerleri gösterir.
+   */
+  const fetchDataFallback = async (tab: TabType) => {
+    if (tab === 'overview' || tab === 'merchants') {
+      const { data: merchantRows } = await supabase
+        .from('merchants')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      const statsMap = await fetchMerchantStatsMap();
+      const merchantList = applyMerchantStats((merchantRows || []) as MerchantData[], statsMap);
+      setMerchants(tab === 'overview' ? merchantList.slice(0, 5) : merchantList);
+
+      if (tab === 'overview') {
+        const { data: customerRows } = await supabase
+          .from('customers')
+          .select('id, full_name, phone, points_balance, is_active, created_at');
+        const customerList = (customerRows || []) as CustomerData[];
+        setCustomers(customerList);
+
+        // Genel toplamlar: tüm esnaf özetlerinin toplamı
+        const allStats = statsMap ? Object.values(statsMap) : [];
+        setStats({
+          totalCustomers: customerList.length,
+          totalMerchants: (merchantRows || []).length,
+          totalTransactions: 0,
+          totalRevenue: allStats.reduce((sum, s) => sum + s.revenue, 0),
+          totalPoints: allStats.reduce((sum, s) => sum + s.points, 0),
+        });
+      }
+      return;
+    }
+
+    if (tab === 'customers') {
+      const { data } = await supabase
+        .from('customers')
+        .select('*')
+        .order('created_at', { ascending: false });
+      setCustomers((data || []) as CustomerData[]);
+      return;
+    }
+
+    if (tab === 'transactions') {
+      const { data } = await supabase
+        .from('transactions')
+        .select('*, customers(full_name, phone), merchants(store_name, store_id)')
+        .order('created_at', { ascending: false })
+        .limit(200);
+      setTransactions((data || []) as unknown as TransactionData[]);
     }
   };
 
@@ -532,11 +717,37 @@ export function AdminPanel() {
             return;
           }
         } catch {
-          // Ağ hatası: doğrudan sorguya geçilir
+          // Ağ hatası: veritabanı yollarına geçilir
         }
       }
 
-      // 2) Doğrudan sorgu (yedek yol)
+      // 2) Veritabanı RPC'si — Edge Function deploy edilmemiş olsa da çalışır
+      try {
+        const { data: rpcData, error: rpcError } = await supabase.rpc('admin_esnaf_islem_ozeti', {
+          p_merchant_id: merchant.id,
+        });
+        const rpcResult = rpcData as {
+          success?: boolean;
+          transactions?: unknown;
+          stats?: Record<string, unknown>;
+        } | null;
+
+        if (!rpcError && rpcResult?.success && rpcResult.stats) {
+          setMerchantTransactions((rpcResult.transactions || []) as TransactionData[]);
+          setDetailStats({
+            revenue: Number(rpcResult.stats.revenue) || 0,
+            points: Number(rpcResult.stats.points) || 0,
+            spent: Number(rpcResult.stats.spent) || 0,
+            customers: Number(rpcResult.stats.customers) || 0,
+            transactionCount: Number(rpcResult.stats.transaction_count) || 0,
+          });
+          return;
+        }
+      } catch (rpcErr) {
+        console.warn('[AdminPanel] Detay RPC kullanılamadı:', rpcErr);
+      }
+
+      // 3) Doğrudan sorgu (son yedek yol)
       const { data, error } = await supabase
         .from('transactions')
         .select('id, type, amount, points, status, created_at, customer_id, customers(full_name, phone), merchants(store_name, store_id)')
@@ -1350,7 +1561,10 @@ export function AdminPanel() {
                         <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Telefon</th>
                         <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">E-posta</th>
                         <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Konum</th>
+                        <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Müşteri</th>
                         <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Ciro</th>
+                        <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Dağıtılan Puan</th>
+                        <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Harcanan Puan</th>
                         <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Abonelik</th>
                         <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Durum</th>
                         <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">İşlemler</th>
@@ -1388,7 +1602,10 @@ export function AdminPanel() {
                               <p className="text-xs text-gray-400">{merchant.latitude && merchant.longitude ? `${merchant.latitude}, ${merchant.longitude}` : 'Konum yok'}</p>
                             </div>
                           </td>
+                          <td className="px-4 py-3 text-sm font-semibold text-gray-900">{merchant.total_customers ?? 0}</td>
                           <td className="px-4 py-3 text-sm font-semibold text-primary-600">{formatCurrency(merchant.total_revenue ?? 0)}</td>
+                          <td className="px-4 py-3 text-sm font-semibold text-emerald-600">{merchant.total_points_distributed ?? 0} TL</td>
+                          <td className="px-4 py-3 text-sm font-semibold text-orange-600">{merchant.total_points_spent ?? 0} TL</td>
 
                           {/* Abonelik / ödeme durumu */}
                           <td className="px-4 py-3">
@@ -1489,7 +1706,7 @@ export function AdminPanel() {
                       })}
                       {visibleMerchants.length === 0 && (
                         <tr>
-                          <td colSpan={9} className="px-4 py-10 text-center text-sm text-gray-500">
+                          <td colSpan={12} className="px-4 py-10 text-center text-sm text-gray-500">
                             {merchantFilter === 'overdue'
                               ? 'Ödemesi geciken esnaf bulunmuyor.'
                               : merchantFilter === 'passive'
