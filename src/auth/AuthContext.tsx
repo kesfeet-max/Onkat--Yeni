@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
-import { OAUTH_ROLE_STORAGE_KEY } from '../lib/google-signup';
 import type { User, CustomerProfile, MerchantProfile, UserRole } from '../types';
 
 interface AuthContextType {
@@ -412,8 +411,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
    *
    * Mevcut e-posta+şifre akışına dokunmaz; alternatif bir yol sunar.
    * Kullanıcı Google onayından sonra `/google-tamamla` adresine döner.
-   * Profil (müşteri/esnaf) yoksa orada hiçbir bilgi istenmeden sessizce
-   * oluşturulur ve kullanıcı doğrudan paneline yönlendirilir.
+   * Profil (müşteri/esnaf) yoksa o sayfada eksik bilgiler tamamlanır,
+   * profil varsa doğrudan `/panel` adresine yönlendirilir.
    *
    * @param role Kullanıcının bulunduğu ekrandaki rol tercihi (müşteri/esnaf).
    */
@@ -424,9 +423,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Rol tercihi OAuth yönlendirmesi boyunca korunur (redirect state kaybolabilir)
       if (role) {
         try {
-          localStorage.setItem(OAUTH_ROLE_STORAGE_KEY, role);
+          localStorage.setItem('onkati-oauth-role', role);
         } catch {
-          // localStorage erişilemezse varsayılan rol (müşteri) kullanılır
+          // localStorage erişilemezse rol seçimi tamamlama ekranında istenir
         }
       }
 

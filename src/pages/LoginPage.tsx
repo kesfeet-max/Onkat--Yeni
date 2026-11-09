@@ -94,7 +94,7 @@ export function LoginPage() {
           )}
 
           {/* Google ile hızlı giriş — mevcut telefon/şifre formu aynen korunur */}
-          <GoogleAuthButton helperText="Tek tıkla giriş — ek bilgi veya onay istenmez" />
+          <GoogleAuthButton helperText="Esnaf ve müşteriler için geçerlidir" />
 
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
