@@ -1,5 +1,4 @@
-project_type: react
-dev_command: npm run dev
-install_command: npm install
-build_command: npm run build
-root_dir: /workspace/app
+build: pnpm run build
+build_path: dist
+dev: pnpm run dev --host 0.0.0.0 --port 5173
+install: pnpm install

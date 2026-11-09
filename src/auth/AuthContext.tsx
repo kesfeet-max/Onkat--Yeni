@@ -1,6 +1,14 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
+import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
+import { normalizePhoneInput } from '../lib/validation';
 import type { User, CustomerProfile, MerchantProfile, UserRole } from '../types';
+
+interface CustomerAuthResult {
+  error?: string;
+  isNew?: boolean;
+  fullName?: string;
+}
 
 interface AuthContextType {
   user: User | null;
@@ -8,14 +16,28 @@ interface AuthContextType {
   userRole: UserRole | null;
   loading: boolean;
   error: string | null;
-  signInWithPhone: (phone: string, password: string) => Promise<{ error?: string }>;
-  signInWithEmail: (email: string, password: string) => Promise<{ error?: string }>;
-  signInWithGoogle: (role?: UserRole) => Promise<{ error?: string }>;
+  /** Müşteri: şifresiz, SMS'siz telefon girişi. Kayıtlı değilse ad soyad ile anında kayıt. */
+  signInCustomerWithPhone: (phone: string, fullName: string) => Promise<CustomerAuthResult>;
+  /** Esnaf: telefon numarası + şifre ile giriş. */
+  signInMerchant: (phone: string, password: string) => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+const CUSTOMER_AUTH_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/customer-phone-auth`;
+
+function toAuthUser(session: Session): User {
+  return {
+    id: session.user.id,
+    email: session.user.email,
+    phone: session.user.user_metadata?.phone,
+    role: session.user.user_metadata?.role,
+  };
+}
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -23,16 +45,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [userRole, setUserRole] = useState<UserRole | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const fetchingRef = useRef(false);
   const mountedRef = useRef(true);
   const initializedRef = useRef(false);
 
   const fetchProfile = useCallback(async (userId: string): Promise<CustomerProfile | MerchantProfile | null> => {
-    if (fetchingRef.current) return null;
-    fetchingRef.current = true;
-
     try {
-      // Müşteri profili — güvenli kolon seçimi
       const { data: customerData, error: custErr } = await supabase
         .from('customers')
         .select('id, user_id, full_name, phone, is_active, created_at')
@@ -40,23 +57,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .maybeSingle();
 
       if (!custErr && customerData) {
-        const safeCustomer: CustomerProfile = {
+        if (mountedRef.current) setUserRole('customer');
+        return {
           id: customerData.id,
           user_id: customerData.user_id,
           full_name: customerData.full_name || 'Müşteri',
           phone: customerData.phone || '',
-          email: '',
           points_balance: 0,
-          device_id: '',
           is_active: customerData.is_active ?? true,
           created_at: customerData.created_at || '',
           updated_at: '',
         };
-        if (mountedRef.current) setUserRole('customer');
-        return safeCustomer;
       }
 
-      // Esnaf profili
       const { data: merchantData, error: merchErr } = await supabase
         .from('merchants')
         .select('id, user_id, store_id, store_name, full_name, phone, city, district, sector, is_active, created_at')
@@ -87,9 +100,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           subscription_paid_until: null,
         };
 
-        // Abonelik kolonları henüz migration ile eklenmemiş olabilir.
-        // Bu yüzden AYRI ve hataya toleranslı bir sorgu ile okunur; hata olursa
-        // varsayılan (null) değerler korunur ve panel beyaz ekran vermez.
+        // Abonelik kolonları migration ile sonradan eklendiği için ayrı ve hataya toleranslı okunur
         try {
           const { data: subData, error: subErr } = await supabase
             .from('merchants')
@@ -98,183 +109,106 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             .maybeSingle();
 
           if (!subErr && subData) {
-            safeMerchant.subscription_status = (subData as any).subscription_status ?? null;
-            safeMerchant.trial_ends_at = (subData as any).trial_ends_at ?? null;
-            safeMerchant.subscription_paid_until = (subData as any).subscription_paid_until ?? null;
-          } else if (subErr) {
-            console.warn('Abonelik alanları okunamadı (varsayılanlar kullanılıyor):', subErr.message);
+            const sub = subData as Record<string, string | null>;
+            safeMerchant.subscription_status = sub.subscription_status ?? null;
+            safeMerchant.trial_ends_at = sub.trial_ends_at ?? null;
+            safeMerchant.subscription_paid_until = sub.subscription_paid_until ?? null;
           }
         } catch (subCatchErr) {
-          console.warn('Abonelik alanları sorgusu başarısız:', subCatchErr);
+          console.warn('Abonelik alanları okunamadı:', subCatchErr);
         }
 
         if (mountedRef.current) setUserRole('merchant');
         return safeMerchant;
       }
 
-      // Her iki tablo da sonuç vermedi — logla
-      if (custErr) console.warn('Customer profile RLS/error:', custErr.message);
-      if (merchErr) console.warn('Merchant profile RLS/error:', merchErr.message);
-
       return null;
     } catch (err) {
       console.error('Profile fetch unexpected error:', err);
       return null;
-    } finally {
-      fetchingRef.current = false;
     }
+  }, []);
+
+  /** Oturum açıldıktan sonra profili (kısa yeniden denemelerle) yükler. */
+  const loadProfileFor = useCallback(async (userId: string) => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const userProfile = await fetchProfile(userId);
+      if (userProfile) {
+        if (mountedRef.current) setProfile(userProfile);
+        return userProfile;
+      }
+      await wait(400);
+    }
+    return null;
+  }, [fetchProfile]);
+
+  const clearState = useCallback(() => {
+    setUser(null);
+    setProfile(null);
+    setUserRole(null);
   }, []);
 
   const signOut = useCallback(async () => {
     setLoading(true);
     await supabase.auth.signOut();
-    setUser(null);
-    setProfile(null);
-    setUserRole(null);
+    clearState();
     setLoading(false);
-  }, []);
-
-  // Oturum state'ini session'dan güncelle
-  const updateSessionState = useCallback(async (session: any) => {
-    if (!session?.user) {
-      if (mountedRef.current) {
-        setUser(null);
-        setProfile(null);
-        setUserRole(null);
-        setLoading(false);
-      }
-      return;
-    }
-
-    const authUser: User = {
-      id: session.user.id,
-      email: session.user.email,
-      phone: session.user.user_metadata?.phone,
-      role: session.user.user_metadata?.role,
-    };
-
-    if (mountedRef.current) {
-      setUser(authUser);
-    }
-
-    const userProfile = await fetchProfile(session.user.id);
-    if (mountedRef.current) {
-      setProfile(userProfile);
-      if (!userProfile && session.user.user_metadata?.role) {
-        setUserRole(session.user.user_metadata.role as UserRole);
-      }
-      setLoading(false);
-    }
-  }, [fetchProfile]);
+  }, [clearState]);
 
   useEffect(() => {
     mountedRef.current = true;
 
     const initializeAuth = async () => {
-      // Çift başlatmayı önle
       if (initializedRef.current) return;
       initializedRef.current = true;
 
       try {
-        // localStorage'dan mevcut session'ı oku
         const { data: { session } } = await supabase.auth.getSession();
-
         if (session?.user && mountedRef.current) {
-          await updateSessionState(session);
-        } else {
-          // Session yok — loading'i kapat
-          if (mountedRef.current) setLoading(false);
+          setUser(toAuthUser(session));
+          await loadProfileFor(session.user.id);
         }
       } catch (err) {
         console.error('Auth initialization error:', err);
-        if (mountedRef.current) {
-          setError('Kimlik doğrulama hatası');
-          setLoading(false);
-        }
+        if (mountedRef.current) setError('Kimlik doğrulama hatası');
+      } finally {
+        if (mountedRef.current) setLoading(false);
       }
     };
 
     initializeAuth();
 
-    // Auth state değişikliklerini dinle
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (!mountedRef.current) return;
 
-      console.log('[Auth] Event:', event);
+      if (event === 'SIGNED_OUT') {
+        clearState();
+        setLoading(false);
+        return;
+      }
 
-      switch (event) {
-        case 'SIGNED_OUT':
-          setUser(null);
-          setProfile(null);
-          setUserRole(null);
-          setLoading(false);
-          break;
-
-        case 'SIGNED_IN':
-        case 'TOKEN_REFRESHED':
-          // Token yenilendiğinde veya giriş yapıldığında state'i güncelle
-          if (session?.user) {
-            const authUser: User = {
-              id: session.user.id,
-              email: session.user.email,
-              phone: session.user.user_metadata?.phone,
-              role: session.user.user_metadata?.role,
-            };
-            setUser(authUser);
-
-            // Profil sadece SIGNED_IN'de çekilsin (TOKEN_REFRESHED'da gereksiz)
-            if (event === 'SIGNED_IN') {
-              fetchProfile(session.user.id).then((userProfile) => {
-                if (mountedRef.current) {
-                  setProfile(userProfile);
-                  if (!userProfile && session.user.user_metadata?.role) {
-                    setUserRole(session.user.user_metadata.role as UserRole);
-                  }
-                }
-              });
-            }
-          }
-          break;
-
-        case 'USER_UPDATED':
-          // Kullanıcı bilgileri güncellendi
-          if (session?.user) {
-            const authUser: User = {
-              id: session.user.id,
-              email: session.user.email,
-              phone: session.user.user_metadata?.phone,
-              role: session.user.user_metadata?.role,
-            };
-            setUser(authUser);
-          }
-          break;
+      if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') && session?.user) {
+        setUser(toAuthUser(session));
+        if (event === 'SIGNED_IN') {
+          fetchProfile(session.user.id).then((userProfile) => {
+            if (userProfile && mountedRef.current) setProfile(userProfile);
+          });
+        }
       }
     });
 
-    // PWA Visibility Change Handler
-    // Uygulama arka plandan döndüğünde session'ı proaktif olarak kontrol et
+    // PWA arka plandan döndüğünde oturumu doğrula
     const handleVisibilityChange = async () => {
-      if (document.visibilityState === 'visible' && mountedRef.current) {
-        try {
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session?.user) {
-            // Session hâlâ geçerli — user state'ini güncelle (token yenilenmiş olabilir)
-            const authUser: User = {
-              id: session.user.id,
-              email: session.user.email,
-              phone: session.user.user_metadata?.phone,
-              role: session.user.user_metadata?.role,
-            };
-            setUser(authUser);
-          } else {
-            // Session kaybolmuş — temizle
-            setUser(null);
-            setProfile(null);
-            setUserRole(null);
-          }
-        } catch (err) {
-          console.warn('[Auth] Visibility change session check failed:', err);
+      if (document.visibilityState !== 'visible' || !mountedRef.current) return;
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          setUser(toAuthUser(session));
+        } else {
+          clearState();
         }
+      } catch (err) {
+        console.warn('[Auth] Oturum kontrolü başarısız:', err);
       }
     };
 
@@ -285,184 +219,98 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       subscription.unsubscribe();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [fetchProfile, updateSessionState]);
+  }, [fetchProfile, loadProfileFor, clearState]);
 
-  const signInWithPhone = useCallback(async (phone: string, password: string) => {
-    setError(null);
-    setLoading(true);
-
-    try {
-      const cleanedPhone = phone.replace(/\D/g, '');
-
-      // RPC ile gerçek giriş e-postasını bul
-      let mappedEmail: string | null = null;
-      try {
-        const { data: rpcResult, error: rpcError } = await supabase.rpc('get_email_by_phone', {
-          p_phone: cleanedPhone,
-        });
-        if (!rpcError && rpcResult?.success) {
-          mappedEmail = rpcResult.email;
-        }
-      } catch {
-        // RPC yoksa aşağıdaki yedek adres denenir
-      }
-
-      /**
-       * Aday e-posta adresleri sırayla denenir.
-       *
-       * Neden: Şifre sıfırlama gerçek auth e-postası (örn. kisi@gmail.com)
-       * üzerinden yapılır. Eşleme tek bir adrese bağlı kalırsa, tablodaki
-       * e-posta boş/eski olduğunda giriş yanlış adresi dener ve yeni şifre
-       * çalışmıyormuş gibi görünür. Bu yüzden hem eşlenen adres hem de
-       * varsayılan yerel adres denenir.
-       */
-      const candidateEmails = Array.from(
-        new Set([mappedEmail, `${cleanedPhone}@onkati.local`].filter(Boolean) as string[])
-      );
-
-      let data: Awaited<ReturnType<typeof supabase.auth.signInWithPassword>>['data'] | null = null;
-      let lastFailed = true;
-
-      for (const candidate of candidateEmails) {
-        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-          email: candidate,
-          password,
-        });
-
-        if (!signInError && signInData?.user) {
-          data = signInData;
-          lastFailed = false;
-          break;
-        }
-      }
-
-      if (lastFailed || !data) {
-        setLoading(false);
-        return { error: 'Geçersiz telefon numarası veya şifre' };
-      }
-
-      if (data.user) {
-        const authUser: User = {
-          id: data.user.id,
-          email: data.user.email,
-          phone: data.user.user_metadata?.phone,
-          role: data.user.user_metadata?.role,
-        };
-        setUser(authUser);
-
-        const userProfile = await fetchProfile(data.user.id);
-        setProfile(userProfile);
-        if (!userProfile && data.user.user_metadata?.role) {
-          setUserRole(data.user.user_metadata.role as UserRole);
-        }
-      }
-
-      setLoading(false);
-      return {};
-    } catch (err) {
-      console.error('signInWithPhone error:', err);
-      setLoading(false);
-      return { error: 'Giriş sırasında bir hata oluştu' };
-    }
-  }, [fetchProfile]);
-
-  const signInWithEmail = useCallback(async (email: string, password: string) => {
-    setError(null);
-    setLoading(true);
-
-    try {
-      const { data, error: signInError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-      if (signInError) {
-        setLoading(false);
-        return { error: 'Geçersiz e-posta veya şifre' };
-      }
-
-      if (data.user) {
-        const authUser: User = {
-          id: data.user.id,
-          email: data.user.email,
-          phone: data.user.user_metadata?.phone,
-          role: data.user.user_metadata?.role,
-        };
-        setUser(authUser);
-
-        const userProfile = await fetchProfile(data.user.id);
-        setProfile(userProfile);
-        if (!userProfile && data.user.user_metadata?.role) {
-          setUserRole(data.user.user_metadata.role as UserRole);
-        }
-      }
-
-      setLoading(false);
-      return {};
-    } catch (err) {
-      console.error('signInWithEmail error:', err);
-      setLoading(false);
-      return { error: 'Giriş sırasında bir hata oluştu' };
-    }
-  }, [fetchProfile]);
-
-  /**
-   * Google (OAuth) ile giriş / kayıt akışını başlatır.
-   *
-   * Mevcut e-posta+şifre akışına dokunmaz; alternatif bir yol sunar.
-   * Kullanıcı Google onayından sonra `/google-tamamla` adresine döner.
-   * Profil (müşteri/esnaf) yoksa o sayfada eksik bilgiler tamamlanır,
-   * profil varsa doğrudan `/panel` adresine yönlendirilir.
-   *
-   * @param role Kullanıcının bulunduğu ekrandaki rol tercihi (müşteri/esnaf).
-   */
-  const signInWithGoogle = useCallback(async (role?: UserRole) => {
+  const signInCustomerWithPhone = useCallback(async (phone: string, fullName: string): Promise<CustomerAuthResult> => {
     setError(null);
 
     try {
-      // Rol tercihi OAuth yönlendirmesi boyunca korunur (redirect state kaybolabilir)
-      if (role) {
-        try {
-          localStorage.setItem('onkati-oauth-role', role);
-        } catch {
-          // localStorage erişilemezse rol seçimi tamamlama ekranında istenir
-        }
-      }
-
-      const redirectTo = `${window.location.origin}/google-tamamla`;
-
-      const { error: oauthError } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo,
-          queryParams: {
-            access_type: 'offline',
-            prompt: 'select_account',
-          },
+      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+      const response = await fetch(CUSTOMER_AUTH_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: anonKey,
+          Authorization: `Bearer ${anonKey}`,
         },
+        body: JSON.stringify({ phone: normalizePhoneInput(phone), full_name: fullName.trim() }),
       });
 
-      if (oauthError) {
-        console.error('signInWithGoogle error:', oauthError);
-        return { error: 'Google ile giriş başlatılamadı. Lütfen tekrar deneyin.' };
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data?.success || !data?.session) {
+        return { error: data?.error || 'Giriş yapılamadı. Lütfen tekrar deneyin.' };
       }
 
-      return {};
+      const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+      });
+
+      if (sessionError || !sessionData.session) {
+        return { error: 'Oturum başlatılamadı. Lütfen tekrar deneyin.' };
+      }
+
+      setUser(toAuthUser(sessionData.session));
+      await loadProfileFor(sessionData.session.user.id);
+
+      return { isNew: Boolean(data.is_new), fullName: data.full_name };
     } catch (err) {
-      console.error('signInWithGoogle unexpected error:', err);
-      return { error: 'Google ile giriş sırasında bir hata oluştu.' };
+      console.error('signInCustomerWithPhone error:', err);
+      return { error: 'Bağlantı hatası. Lütfen tekrar deneyin.' };
     }
-  }, []);
+  }, [loadProfileFor]);
+
+  const signInMerchant = useCallback(async (phone: string, password: string) => {
+    setError(null);
+
+    try {
+      const cleanedPhone = normalizePhoneInput(phone);
+      const candidateEmails = new Set<string>();
+
+      // Esnafın gerçek (dahili) giriş adresi veritabanından bulunur
+      for (const fn of ['esnaf_giris_eposta', 'get_email_by_phone']) {
+        try {
+          const { data, error: rpcError } = await supabase.rpc(fn, { p_phone: cleanedPhone });
+          const result = data as { success?: boolean; email?: string } | null;
+          if (!rpcError && result?.success && result.email) candidateEmails.add(result.email);
+        } catch {
+          // RPC henüz kurulmamış olabilir; yedek adresler denenir
+        }
+      }
+      candidateEmails.add(`esnaf-${cleanedPhone}@onkati.local`);
+      candidateEmails.add(`${cleanedPhone}@onkati.local`);
+
+      for (const email of candidateEmails) {
+        const { data, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+        if (signInError || !data.session) continue;
+
+        const userProfile = await fetchProfile(data.session.user.id);
+        if (!userProfile || !('store_id' in userProfile)) {
+          await supabase.auth.signOut();
+          clearState();
+          return { error: 'Bu numara esnaf hesabı değil. Müşteri girişini kullanın.' };
+        }
+
+        setUser(toAuthUser(data.session));
+        setProfile(userProfile);
+        return {};
+      }
+
+      return { error: 'Telefon numarası veya şifre hatalı' };
+    } catch (err) {
+      console.error('signInMerchant error:', err);
+      return { error: 'Giriş sırasında bir hata oluştu' };
+    }
+  }, [fetchProfile, clearState]);
 
   const refreshProfile = useCallback(async () => {
-    if (user?.id) {
-      const userProfile = await fetchProfile(user.id);
-      if (mountedRef.current) setProfile(userProfile);
-    }
-  }, [user, fetchProfile]);
+    if (user?.id) await loadProfileFor(user.id);
+  }, [user, loadProfileFor]);
 
   return (
-    <AuthContext.Provider value={{ user, profile, userRole, loading, error, signInWithPhone, signInWithEmail, signInWithGoogle, signOut, refreshProfile }}>
+    <AuthContext.Provider
+      value={{ user, profile, userRole, loading, error, signInCustomerWithPhone, signInMerchant, signOut, refreshProfile }}
+    >
       {children}
     </AuthContext.Provider>
   );

@@ -1,20 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { BrandLogo } from '../components/BrandLogo';
-import { GoogleAuthButton } from '../components/GoogleAuthButton';
-import {
-  Phone,
-  Mail,
-  Lock,
-  User,
-  Building2,
-  MapPin,
-  AlertCircle,
-  Store,
-  Eye,
-  EyeOff,
-  CheckCircle,
-} from 'lucide-react';
+import { CustomerPhoneAuthForm } from '../components/CustomerPhoneAuthForm';
+import { Phone, Lock, User, Building2, MapPin, AlertCircle, Store, Eye, EyeOff, CheckCircle } from 'lucide-react';
+import { useAuth } from '../auth/AuthContext';
 import { getCurrentLocation } from '../lib/utils';
 import {
   PHONE_LENGTH,
@@ -26,56 +15,31 @@ import {
 } from '../lib/validation';
 import type { UserRole } from '../types';
 
-export function RegisterPage() {
-  const [searchParams] = useSearchParams();
-  const roleParam = searchParams.get('role');
-  const [role, setRole] = useState<UserRole>((roleParam as UserRole) || 'customer');
+const SECTORS = [
+  { value: 'market', label: 'Market / Bakkal' },
+  { value: 'restoran', label: 'Restoran / Kafe' },
+  { value: 'temizlik', label: 'Temizlik / Kuru Temizleme' },
+  { value: 'kozmetik', label: 'Kozmetik / Kuaför' },
+  { value: 'elektronik', label: 'Elektronik' },
+  { value: 'giyim', label: 'Giyim / Tekstil' },
+  { value: 'diger', label: 'Diğer' },
+];
+
+const inputClass =
+  'w-full px-4 py-3 rounded-xl border-2 border-gray-200 bg-white focus:ring-2 focus:ring-secondary-200 focus:border-secondary-500 transition-all text-gray-900';
+
+/** Esnaf kaydı: ad soyad, telefon, şifre ve dükkan bilgileri (e-posta istenmez). */
+function MerchantRegisterForm() {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [isLocating, setIsLocating] = useState(false);
-  const navigate = useNavigate();
-
-  const [kvkkApproved, setKvkkApproved] = useState(false);
-  const [termsApproved, setTermsApproved] = useState(false);
-
-  // Anlık alan doğrulama mesajları
-  const [nameError, setNameError] = useState<string | null>(null);
-  const [phoneError, setPhoneError] = useState<string | null>(null);
-
-  /** Ad Soyad: "@" ve rakam gibi geçersiz karakterler input'a hiç yazılamaz. */
-  const handleFullNameChange = (rawValue: string) => {
-    const sanitized = sanitizeFullNameInput(rawValue);
-    setFormData((prev) => ({ ...prev, full_name: sanitized }));
-
-    // Kullanıcı e-posta yazmayı denerse anında uyarı ver
-    if (rawValue !== sanitized || sanitized.trim().length > 0) {
-      const result = validateFullName(sanitized);
-      setNameError(result.valid ? null : result.message ?? null);
-    } else {
-      setNameError(null);
-    }
-  };
-
-  /** Telefon: baştaki 0 otomatik eklenir, en fazla 11 hane girilebilir. */
-  const handlePhoneChange = (rawValue: string) => {
-    const normalized = normalizePhoneInput(rawValue);
-    setFormData((prev) => ({ ...prev, phone: normalized }));
-
-    if (!normalized) {
-      setPhoneError(null);
-      return;
-    }
-    const result = validatePhone(normalized);
-    setPhoneError(result.valid ? null : result.message ?? null);
-  };
-
-  const [formData, setFormData] = useState({
-    phone: '',
-    email: '',
-    password: '',
+  const [isLocating, setIsLocating] = useState(true);
+  const [form, setForm] = useState({
     full_name: '',
+    phone: '',
+    password: '',
     store_name: '',
     city: '',
     district: '',
@@ -85,428 +49,251 @@ export function RegisterPage() {
   });
 
   useEffect(() => {
-    if (role === 'merchant') {
-      setIsLocating(true);
-      getCurrentLocation().then((location) => {
-        if (location) {
-          setFormData((prev) => ({
-            ...prev,
-            latitude: location.latitude,
-            longitude: location.longitude,
-          }));
-        }
-        setIsLocating(false);
-      });
-    }
-  }, [role]);
+    getCurrentLocation().then((location) => {
+      if (location) setForm((prev) => ({ ...prev, latitude: location.latitude, longitude: location.longitude }));
+      setIsLocating(false);
+    });
+  }, []);
+
+  const update = (key: keyof typeof form, value: string) => setForm((prev) => ({ ...prev, [key]: value }));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
-    if (!kvkkApproved || !termsApproved) {
-      setError('Devam etmek için KVKK Aydınlatma Metni ve Üyelik Koşullarını onaylamanız gerekmektedir.');
-      return;
-    }
-
-    // Ad Soyad doğrulaması — e-posta adresi girilmesi engellenir
-    const nameResult = validateFullName(formData.full_name);
-    if (!nameResult.valid) {
-      setNameError(nameResult.message ?? null);
-      setError(nameResult.message ?? null);
-      return;
-    }
-    setNameError(null);
-
-    // Telefon doğrulaması — başında 0 ile tam 11 hane zorunlu
-    const phoneResult = validatePhone(formData.phone);
-    if (!phoneResult.valid) {
-      setPhoneError(phoneResult.message ?? null);
-      setError(phoneResult.message ?? null);
-      return;
-    }
-    setPhoneError(null);
+    const nameResult = validateFullName(form.full_name);
+    if (!nameResult.valid) return setError(nameResult.message ?? 'Geçersiz ad soyad');
+    const phoneResult = validatePhone(form.phone);
+    if (!phoneResult.valid) return setError(phoneResult.message ?? 'Geçersiz telefon');
+    if (form.password.length < 6) return setError('Şifre en az 6 karakter olmalıdır');
 
     setLoading(true);
-
     try {
-      const cleanedPhone = normalizePhoneInput(formData.phone);
-      const cleanedFullName = normalizeFullName(formData.full_name);
-
-      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/auth-register`;
-      const response = await fetch(apiUrl, {
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/auth-register`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
         },
         body: JSON.stringify({
-          role,
-          phone: cleanedPhone,
-          email: formData.email,
-          password: formData.password,
-          full_name: cleanedFullName,
-          store_name: formData.store_name || undefined,
-          city: formData.city || undefined,
-          district: formData.district || undefined,
-          sector: formData.sector || undefined,
-          latitude: formData.latitude || undefined,
-          longitude: formData.longitude || undefined,
-          kvkk_approved: kvkkApproved,
-          terms_approved: termsApproved,
+          ...form,
+          phone: normalizePhoneInput(form.phone),
+          full_name: normalizeFullName(form.full_name),
         }),
       });
-
-      const data = await response.json();
-
+      const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         setError(data.error || 'Kayıt başarısız');
-        setLoading(false);
         return;
       }
-
       setSuccess(true);
-      setLoading(false);
-
-      setTimeout(() => {
-        navigate('/giris');
-      }, 2000);
-    } catch (err) {
+      setTimeout(() => navigate('/giris?role=merchant'), 2000);
+    } catch {
       setError('Kayıt sırasında bir hata oluştu');
+    } finally {
       setLoading(false);
     }
   };
 
   if (success) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-primary-600 via-primary-700 to-primary-800 flex items-center justify-center p-4">
-        <div className="bg-white rounded-3xl shadow-2xl p-8 text-center max-w-md w-full">
-          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <CheckCircle className="w-8 h-8 text-green-600" />
-          </div>
-          <h2 className="text-2xl font-heading font-bold text-gray-900 mb-2">Kayıt Başarılı!</h2>
-          <p className="text-gray-600 mb-4">Giriş sayfasına yönlendiriliyorsunuz...</p>
+      <div className="text-center py-6">
+        <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+          <CheckCircle className="w-8 h-8 text-green-600" />
         </div>
+        <h2 className="text-xl font-heading font-bold text-gray-900 mb-1">Kayıt Başarılı!</h2>
+        <p className="text-gray-600 text-sm">Esnaf girişine yönlendiriliyorsunuz...</p>
       </div>
     );
   }
 
   return (
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4" noValidate>
+      {error && (
+        <div className="p-3.5 bg-red-50 border border-red-200 rounded-xl flex items-start gap-2.5 text-red-700">
+          <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+          <span className="text-sm">{error}</span>
+        </div>
+      )}
+
+      <div>
+        <label className="block text-sm font-semibold text-gray-800 mb-2">Ad Soyad</label>
+        <div className="relative">
+          <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <input
+            type="text"
+            autoComplete="name"
+            value={form.full_name}
+            onChange={(e) => update('full_name', sanitizeFullNameInput(e.target.value))}
+            className={`${inputClass} pl-12`}
+            placeholder="Yetkili adı soyadı"
+          />
+        </div>
+      </div>
+
+      <div>
+        <label className="block text-sm font-semibold text-gray-800 mb-2">Telefon Numarası</label>
+        <div className="relative">
+          <Phone className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <input
+            type="tel"
+            inputMode="numeric"
+            maxLength={PHONE_LENGTH}
+            value={form.phone}
+            onChange={(e) => update('phone', normalizePhoneInput(e.target.value))}
+            className={`${inputClass} pl-12 tracking-wide`}
+            placeholder="05XX XXX XX XX"
+          />
+        </div>
+      </div>
+
+      <div>
+        <label className="block text-sm font-semibold text-gray-800 mb-2">Esnaf Şifresi</label>
+        <div className="relative">
+          <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <input
+            type={showPassword ? 'text' : 'password'}
+            autoComplete="new-password"
+            value={form.password}
+            onChange={(e) => update('password', e.target.value)}
+            className={`${inputClass} pl-12 pr-12`}
+            placeholder="En az 6 karakter"
+          />
+          <button
+            type="button"
+            onClick={() => setShowPassword((v) => !v)}
+            className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+            aria-label={showPassword ? 'Şifreyi gizle' : 'Şifreyi göster'}
+          >
+            {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+          </button>
+        </div>
+      </div>
+
+      <div>
+        <label className="block text-sm font-semibold text-gray-800 mb-2">Dükkan Adı</label>
+        <div className="relative">
+          <Building2 className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <input
+            type="text"
+            value={form.store_name}
+            onChange={(e) => update('store_name', e.target.value)}
+            className={`${inputClass} pl-12`}
+            placeholder="Dükkanınızın adı"
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="block text-sm font-semibold text-gray-800 mb-2">İl</label>
+          <input type="text" value={form.city} onChange={(e) => update('city', e.target.value)} className={inputClass} placeholder="İstanbul" />
+        </div>
+        <div>
+          <label className="block text-sm font-semibold text-gray-800 mb-2">İlçe</label>
+          <input type="text" value={form.district} onChange={(e) => update('district', e.target.value)} className={inputClass} placeholder="Kadıköy" />
+        </div>
+      </div>
+
+      <div>
+        <label className="block text-sm font-semibold text-gray-800 mb-2">Sektör</label>
+        <select value={form.sector} onChange={(e) => update('sector', e.target.value)} className={inputClass}>
+          <option value="">Sektör seçin</option>
+          {SECTORS.map((s) => (
+            <option key={s.value} value={s.value}>{s.label}</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="p-3.5 bg-blue-50 border border-blue-200 rounded-xl flex items-center gap-2 text-sm text-blue-800 font-medium">
+        <MapPin className="w-4 h-4 flex-shrink-0" />
+        {isLocating ? (
+          <span>Konumunuz belirleniyor...</span>
+        ) : form.latitude ? (
+          <span>Konum: {form.latitude.toFixed(5)}, {form.longitude.toFixed(5)}</span>
+        ) : (
+          <span className="text-red-600">Konum erişimi gerekli. Tarayıcı izinlerini kontrol edin.</span>
+        )}
+      </div>
+
+      <p className="text-[11px] sm:text-xs text-gray-500 leading-relaxed text-center">
+        Kaydolarak{' '}
+        <a href="/yasal/kvkk" target="_blank" rel="noopener noreferrer" className="text-primary-600 font-semibold underline">KVKK Aydınlatma Metni</a>{' '}
+        ve{' '}
+        <a href="/yasal/esnaf-kosullari" target="_blank" rel="noopener noreferrer" className="text-primary-600 font-semibold underline">Esnaf Üyelik Koşulları</a>{' '}
+        hakkında bilgilendirildiğinizi kabul etmiş olursunuz.
+      </p>
+
+      <button
+        type="submit"
+        disabled={loading || !form.latitude}
+        className="w-full bg-secondary-500 text-primary-900 py-4 rounded-xl font-bold hover:bg-secondary-600 transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {loading ? 'Kaydediliyor...' : 'Esnaf Kaydını Tamamla'}
+      </button>
+    </form>
+  );
+}
+
+export function RegisterPage() {
+  const [searchParams] = useSearchParams();
+  const [role, setRole] = useState<UserRole>(searchParams.get('role') === 'merchant' ? 'merchant' : 'customer');
+  const { user } = useAuth();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (user) navigate('/panel');
+  }, [user, navigate]);
+
+  return (
     <div className="min-h-screen bg-gradient-to-br from-primary-600 via-primary-700 to-primary-800 py-8 px-4">
       <div className="max-w-lg mx-auto">
-        <div className="bg-white rounded-3xl shadow-2xl p-8">
-          <div className="text-center mb-8">
-            <div className="flex justify-center mb-4">
+        <div className="bg-white rounded-3xl shadow-2xl p-6 sm:p-8">
+          <div className="text-center mb-6">
+            <div className="flex justify-center mb-3">
               <BrandLogo to="/" size="lg" />
             </div>
-            <h1 className="text-2xl font-heading font-bold text-gray-900">Yeni Hesap Oluştur</h1>
+            <h1 className="text-2xl font-heading font-bold text-gray-900">
+              {role === 'customer' ? 'Üye Ol' : 'Esnaf Kaydı'}
+            </h1>
+            <p className="text-gray-500 mt-1.5 text-sm">
+              {role === 'customer' ? 'Ad soyad ve telefon numaranızla saniyeler içinde' : 'Dükkanınızı Onkatı’ya ekleyin'}
+            </p>
           </div>
 
-          <div className="flex gap-2 mb-6">
+          <div className="flex gap-2 mb-6 p-1 bg-gray-100 rounded-xl">
             <button
               type="button"
               onClick={() => setRole('customer')}
-              className={`flex-1 py-3 px-4 rounded-xl font-semibold transition-all flex items-center justify-center gap-2 ${
-                role === 'customer'
-                  ? 'bg-primary-600 text-white shadow-lg'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              className={`flex-1 py-2.5 rounded-lg font-semibold text-sm flex items-center justify-center gap-2 transition-all ${
+                role === 'customer' ? 'bg-primary-600 text-white shadow' : 'text-gray-600 hover:text-gray-900'
               }`}
             >
-              <User className="w-5 h-5" />
+              <User className="w-4 h-4" />
               Müşteri
             </button>
             <button
               type="button"
               onClick={() => setRole('merchant')}
-              className={`flex-1 py-3 px-4 rounded-xl font-semibold transition-all flex items-center justify-center gap-2 ${
-                role === 'merchant'
-                  ? 'bg-secondary-500 text-primary-900 shadow-lg'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              className={`flex-1 py-2.5 rounded-lg font-semibold text-sm flex items-center justify-center gap-2 transition-all ${
+                role === 'merchant' ? 'bg-secondary-500 text-primary-900 shadow' : 'text-gray-600 hover:text-gray-900'
               }`}
             >
-              <Store className="w-5 h-5" />
+              <Store className="w-4 h-4" />
               Esnaf
             </button>
           </div>
 
-          {error && (
-            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-center gap-3 text-red-700">
-              <AlertCircle className="w-5 h-5 flex-shrink-0" />
-              <span className="text-sm">{error}</span>
-            </div>
-          )}
-
-          {/* Google ile hızlı kayıt — mevcut form alanları aynen korunur */}
-          <GoogleAuthButton
-            role={role}
-            label="Google ile Devam Et"
-            helperText={
-              role === 'merchant'
-                ? 'Google ile devam ederken dükkan bilgileri sonraki adımda istenir'
-                : 'Google ile devam ederken telefon bilgisi sonraki adımda istenir'
-            }
-          />
-
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            {/* Ad Soyad */}
-            <div className="bg-gray-50 p-4 rounded-xl" style={{ display: 'block', visibility: 'visible' }}>
-              <label className="block text-sm font-semibold text-gray-800 mb-2">
-                Ad Soyad <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
-                <input
-                  type="text"
-                  inputMode="text"
-                  autoComplete="name"
-                  value={formData.full_name}
-                  onChange={(e) => handleFullNameChange(e.target.value)}
-                  required
-                  className={`w-full pl-12 pr-4 py-3 rounded-xl border-2 bg-white focus:ring-2 transition-all text-gray-900 ${
-                    nameError
-                      ? 'border-red-400 focus:ring-red-400 focus:border-red-400'
-                      : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'
-                  }`}
-                  placeholder="Adınızı ve soyadınızı girin"
-                />
-              </div>
-              {nameError ? (
-                <p className="text-xs text-red-600 mt-2 font-semibold">{nameError}</p>
-              ) : (
-                <p className="text-xs text-gray-600 mt-2 font-medium">
-                  E-posta adresi değil, ad ve soyadınızı yazın
-                </p>
-              )}
-            </div>
-
-            {/* Telefon */}
-            <div className="bg-gray-50 p-4 rounded-xl" style={{ display: 'block', visibility: 'visible' }}>
-              <label className="block text-sm font-semibold text-gray-800 mb-2">
-                Telefon Numarası <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <Phone className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
-                <input
-                  type="tel"
-                  inputMode="numeric"
-                  autoComplete="tel"
-                  maxLength={PHONE_LENGTH}
-                  value={formData.phone}
-                  onChange={(e) => handlePhoneChange(e.target.value)}
-                  required
-                  className={`w-full pl-12 pr-4 py-3 rounded-xl border-2 bg-white focus:ring-2 transition-all text-gray-900 tracking-wide ${
-                    phoneError
-                      ? 'border-red-400 focus:ring-red-400 focus:border-red-400'
-                      : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'
-                  }`}
-                  placeholder="05074445588"
-                />
-              </div>
-              {phoneError ? (
-                <p className="text-xs text-red-600 mt-2 font-semibold">{phoneError}</p>
-              ) : (
-                <p className="text-xs text-gray-600 mt-2 font-medium">
-                  Başında 0 olacak şekilde 11 hane (Örn: 05074445588)
-                </p>
-              )}
-            </div>
-
-            {/* E-posta */}
-            <div className="bg-gray-50 p-4 rounded-xl" style={{ display: 'block', visibility: 'visible' }}>
-              <label className="block text-sm font-semibold text-gray-800 mb-2">
-                E-posta Adresi <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
-                <input
-                  type="email"
-                  id="register-email"
-                  name="email"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  required
-                  autoComplete="email"
-                  className="w-full pl-12 pr-4 py-3 rounded-xl border-2 border-gray-300 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-gray-900"
-                  placeholder="ornek@email.com"
-                />
-              </div>
-              <p className="text-xs text-gray-600 mt-2 font-medium">Şifre sıfırlama için kullanılacak</p>
-            </div>
-
-            {/* Şifre */}
-            <div className="bg-gray-50 p-4 rounded-xl" style={{ display: 'block', visibility: 'visible' }}>
-              <label className="block text-sm font-semibold text-gray-800 mb-2">
-                Şifre <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  value={formData.password}
-                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  required
-                  minLength={6}
-                  className="w-full pl-12 pr-12 py-3 rounded-xl border-2 border-gray-300 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-gray-900"
-                  placeholder="En az 6 karakter"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
-                >
-                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                </button>
-              </div>
-            </div>
-
-            {role === 'merchant' && (
-              <>
-                <div className="bg-gray-50 p-4 rounded-xl">
-                  <label className="block text-sm font-semibold text-gray-800 mb-2">
-                    Dükkan Adı <span className="text-red-500">*</span>
-                  </label>
-                  <div className="relative">
-                    <Building2 className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
-                    <input
-                      type="text"
-                      value={formData.store_name}
-                      onChange={(e) => setFormData({ ...formData, store_name: e.target.value })}
-                      required
-                      className="w-full pl-12 pr-4 py-3 rounded-xl border-2 border-gray-300 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-gray-900"
-                      placeholder="Dükkanınızın adı"
-                    />
-                  </div>
-                </div>
-
-                <div className="bg-gray-50 p-4 rounded-xl">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-semibold text-gray-800 mb-2">İl <span className="text-red-500">*</span></label>
-                      <input
-                        type="text"
-                        value={formData.city}
-                        onChange={(e) => setFormData({ ...formData, city: e.target.value })}
-                        required
-                        className="w-full px-4 py-3 rounded-xl border-2 border-gray-300 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-gray-900"
-                        placeholder="İstanbul"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-semibold text-gray-800 mb-2">İlçe <span className="text-red-500">*</span></label>
-                      <input
-                        type="text"
-                        value={formData.district}
-                        onChange={(e) => setFormData({ ...formData, district: e.target.value })}
-                        required
-                        className="w-full px-4 py-3 rounded-xl border-2 border-gray-300 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-gray-900"
-                        placeholder="Kadıköy"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-gray-50 p-4 rounded-xl">
-                  <label className="block text-sm font-semibold text-gray-800 mb-2">Sektör <span className="text-red-500">*</span></label>
-                  <select
-                    value={formData.sector}
-                    onChange={(e) => setFormData({ ...formData, sector: e.target.value })}
-                    required
-                    className="w-full px-4 py-3 rounded-xl border-2 border-gray-300 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-gray-900"
-                  >
-                    <option value="">Sektör seçin</option>
-                    <option value="market">Market / Bakkal</option>
-                    <option value="restoran">Restoran / Kafe</option>
-                    <option value="temizlik">Temizlik / Kuru Temizleme</option>
-                    <option value="kozmetik">Kozmetik / Kuaför</option>
-                    <option value="elektronik">Elektronik</option>
-                    <option value="giyim">Giyim / Tekstil</option>
-                    <option value="diger">Diğer</option>
-                  </select>
-                </div>
-
-                <div className="p-4 bg-blue-50 border-2 border-blue-200 rounded-xl">
-                  <div className="flex items-center gap-2 text-sm text-blue-800 font-medium">
-                    <MapPin className="w-4 h-4" />
-                    {isLocating ? (
-                      <span>Konumunuz belirleniyor...</span>
-                    ) : formData.latitude ? (
-                      <span>
-                        Konum: {formData.latitude.toFixed(6)}, {formData.longitude.toFixed(6)}
-                      </span>
-                    ) : (
-                      <span className="text-red-600">
-                        Konum erişimi gerekli. Tarayıcı izinlerini kontrol edin.
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </>
-            )}
-
-            {/* Yasal Onay Kutuları */}
-            <div className="space-y-3 bg-gray-50 p-4 rounded-xl border border-gray-200">
-              <label className="flex items-start gap-3 cursor-pointer group">
-                <input
-                  type="checkbox"
-                  checked={kvkkApproved}
-                  onChange={(e) => setKvkkApproved(e.target.checked)}
-                  required
-                  className="mt-1 w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 flex-shrink-0"
-                />
-                <span className="text-sm text-gray-700 leading-relaxed">
-                  <a
-                    href="/yasal/kvkk"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-primary-600 font-semibold hover:text-primary-700 underline"
-                  >
-                    KVKK Aydınlatma Metni
-                  </a>
-                  'ni okudum ve onaylıyorum. <span className="text-red-500">*</span>
-                </span>
-              </label>
-
-              <label className="flex items-start gap-3 cursor-pointer group">
-                <input
-                  type="checkbox"
-                  checked={termsApproved}
-                  onChange={(e) => setTermsApproved(e.target.checked)}
-                  required
-                  className="mt-1 w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 flex-shrink-0"
-                />
-                <span className="text-sm text-gray-700 leading-relaxed">
-                  <a
-                    href={role === 'merchant' ? "/yasal/esnaf-kosullari" : "/yasal/musteri-kosullari"}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-primary-600 font-semibold hover:text-primary-700 underline"
-                  >
-                    {role === 'merchant' ? 'Esnaf Üyelik ve Hizmet Koşulları' : 'Müşteri Üyelik ve Hizmet Koşulları'}
-                  </a>
-                  'nı okudum ve kabul ediyorum. <span className="text-red-500">*</span>
-                </span>
-              </label>
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading || (role === 'merchant' && !formData.latitude) || !kvkkApproved || !termsApproved}
-              className="w-full bg-primary-600 text-white py-4 rounded-xl font-semibold hover:bg-primary-700 transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-            >
-              {loading ? (
-                <>
-                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                  Kaydediliyor...
-                </>
-              ) : (
-                'Kayıt Ol'
-              )}
-            </button>
-          </form>
+          {role === 'customer' ? <CustomerPhoneAuthForm /> : <MerchantRegisterForm />}
 
           <p className="mt-6 text-center text-gray-500 text-sm">
-            Hesabınız var mı?{' '}
-            <Link to="/giris" className="text-primary-600 font-semibold hover:text-primary-700">
-              Giriş Yap
+            {role === 'customer' ? 'Esnaf mısınız? ' : 'Hesabınız var mı? '}
+            <Link
+              to={role === 'customer' ? '/kayit?role=merchant' : '/giris?role=merchant'}
+              className="text-primary-600 font-semibold hover:text-primary-700"
+            >
+              {role === 'customer' ? 'Esnaf Kaydı' : 'Esnaf Girişi'}
             </Link>
           </p>
         </div>

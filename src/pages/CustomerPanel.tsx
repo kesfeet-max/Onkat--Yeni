@@ -124,8 +124,6 @@ export function CustomerPanel() {
   const [customerProfileForm, setCustomerProfileForm] = useState({
     full_name: '',
     phone: '',
-    email: '',
-    new_password: '',
   });
   const [savingCustomerProfile, setSavingCustomerProfile] = useState(false);
   const [customerProfileFormInitialized, setCustomerProfileFormInitialized] = useState(false);
@@ -165,8 +163,6 @@ export function CustomerPanel() {
       setCustomerProfileForm({
         full_name: customer.full_name || '',
         phone: customer.phone || '',
-        email: user.email || '',
-        new_password: '',
       });
       setCustomerProfileFormInitialized(true);
     }
@@ -191,19 +187,6 @@ export function CustomerPanel() {
           .update({ phone: cleanedPhone })
           .eq('id', customer.id);
         if (customerError) throw customerError;
-      }
-
-      // E-posta güncelle
-      if (customerProfileForm.email && customerProfileForm.email !== user!.email) {
-        const { error: emailError } = await supabase.auth.updateUser({ email: customerProfileForm.email });
-        if (emailError) throw emailError;
-      }
-
-      // Şifre güncelle (opsiyonel)
-      if (customerProfileForm.new_password && customerProfileForm.new_password.length >= 6) {
-        const { error: passError } = await supabase.auth.updateUser({ password: customerProfileForm.new_password });
-        if (passError) throw passError;
-        setCustomerProfileForm(prev => ({ ...prev, new_password: '' }));
       }
 
       toast.success('Bilgileriniz başarıyla güncellendi');
@@ -517,6 +500,25 @@ export function CustomerPanel() {
   const fetchTransactions = useCallback(async () => {
     try {
       if (!customer?.id) return;
+
+      // Şeffaf geçmiş: işletme adı ile birlikte, sunucu tarafında doğrulanmış kayıtlar
+      try {
+        const { data: rpcData, error: rpcError } = await supabase.rpc('musteri_islem_gecmisi', { p_limit: 100 });
+        const rpcResult = rpcData as { success?: boolean; transactions?: any[] } | null;
+        if (!rpcError && rpcResult?.success && Array.isArray(rpcResult.transactions)) {
+          setTransactions(
+            rpcResult.transactions.map((t: any) => ({
+              ...t,
+              amount: Number(t.amount) || 0,
+              points: Number(t.points) || 0,
+              store_name: t.store_name || 'İşletme',
+            }))
+          );
+          return;
+        }
+      } catch {
+        // Fonksiyon henüz kurulmadıysa doğrudan sorguya geçilir
+      }
 
       const { data: txData, error } = await supabase
         .from('transactions')
@@ -1268,6 +1270,13 @@ export function CustomerPanel() {
         {activeTab === 'gecmis' && (
           <div className="space-y-4">
             <h2 className="text-lg font-bold text-gray-800">İşlem Geçmişi</h2>
+            <div className="flex items-start gap-2 rounded-xl bg-emerald-50 border border-emerald-100 p-3">
+              <ShieldCheck className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-emerald-800 leading-relaxed">
+                İşletmelerin hesabınıza yaptığı her puan yükleme ve harcama işlemi anında kayıt altına alınır ve burada
+                görünür. Kayıtlar sonradan değiştirilemez veya silinemez.
+              </p>
+            </div>
 
             {transactions.length === 0 ? (
               <div className="bg-white rounded-2xl p-10 text-center shadow-sm border border-gray-100">
@@ -1296,14 +1305,17 @@ export function CustomerPanel() {
                         </div>
                         <div>
                           <p className="font-semibold text-gray-900 text-sm">{tx.store_name}</p>
-                          <p className="text-xs text-gray-400 mt-0.5">{formatDate(tx.created_at)}</p>
+                          <p className="text-xs text-gray-400 mt-0.5">Tarih: {formatDate(tx.created_at)}</p>
                         </div>
                       </div>
                       <div className="text-right">
                         <p className={`font-bold ${
                           tx.type === 'earn' ? 'text-emerald-600' : 'text-orange-600'
                         }`}>
-                          {tx.type === 'earn' ? '+' : '-'}{tx.points.toFixed(2)}
+                          {tx.type === 'earn' ? '+' : '-'}{tx.points.toFixed(2)} Puan
+                        </p>
+                        <p className={`text-[11px] font-semibold ${tx.type === 'earn' ? 'text-emerald-700' : 'text-orange-700'}`}>
+                          {tx.type === 'earn' ? 'Yüklendi' : 'Harcandı'}
                         </p>
                         {tx.type === 'earn' && tx.amount > 0 && (
                           <p className="text-xs text-gray-400">{formatCurrency(tx.amount)} alışveriş</p>
@@ -1504,31 +1516,6 @@ export function CustomerPanel() {
                     className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm transition tracking-wide"
                   />
                   <p className="text-xs text-gray-400 mt-1">Başında 0 olacak şekilde 11 hane</p>
-                </div>
-
-                {/* E-posta Adresi */}
-                <div>
-                  <label className="text-xs font-medium text-gray-500 mb-1.5 block">E-posta Adresi</label>
-                  <input
-                    type="email"
-                    value={customerProfileForm.email}
-                    onChange={(e) => setCustomerProfileForm(prev => ({ ...prev, email: e.target.value }))}
-                    placeholder="ornek@email.com"
-                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm transition"
-                  />
-                </div>
-
-                {/* Yeni Şifre (Opsiyonel) */}
-                <div>
-                  <label className="text-xs font-medium text-gray-500 mb-1.5 block">Yeni Şifre (Opsiyonel)</label>
-                  <input
-                    type="password"
-                    value={customerProfileForm.new_password}
-                    onChange={(e) => setCustomerProfileForm(prev => ({ ...prev, new_password: e.target.value }))}
-                    placeholder="En az 6 karakter"
-                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm transition"
-                  />
-                  <p className="text-xs text-gray-400 mt-1">Değiştirmek istemiyorsanız boş bırakın</p>
                 </div>
 
                 {/* Üyelik Tarihi (Salt Okunur) */}

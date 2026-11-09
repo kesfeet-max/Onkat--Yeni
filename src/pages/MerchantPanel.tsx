@@ -137,7 +137,6 @@ export function MerchantPanel() {
     store_name: '',
     full_name: '',
     phone: '',
-    email: '',
     new_password: '',
   });
   const [savingProfile, setSavingProfile] = useState(false);
@@ -174,6 +173,10 @@ export function MerchantPanel() {
   const [paymentType, setPaymentType] = useState<'cash' | 'card'>('cash');
   const [processing, setProcessing] = useState(false);
   const [lastResult, setLastResult] = useState<any>(null);
+
+  // Müşteri numarası ile işlem
+  const [lookupPhone, setLookupPhone] = useState('');
+  const [lookingUp, setLookingUp] = useState(false);
 
   const merchant = profile as any;
   /**
@@ -221,7 +224,6 @@ export function MerchantPanel() {
         store_name: merchant.store_name || '',
         full_name: profile.full_name || '',
         phone: profile.phone || '',
-        email: user.email || '',
         new_password: '',
       });
       setProfileFormInitialized(true);
@@ -260,12 +262,6 @@ export function MerchantPanel() {
           })
           .eq('id', merchant.id);
         if (merchantError) throw merchantError;
-      }
-
-      // E-posta güncelle
-      if (profileForm.email && profileForm.email !== user!.email) {
-        const { error: emailError } = await supabase.auth.updateUser({ email: profileForm.email });
-        if (emailError) throw emailError;
       }
 
       // Şifre güncelle (opsiyonel)
@@ -1114,6 +1110,49 @@ export function MerchantPanel() {
     }
   };
 
+  /** Esnaf müşterinin telefon numarasını yazarak müşteriyi ve bu dükkandaki puanını bulur. */
+  const handlePhoneLookup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const phoneResult = validatePhone(lookupPhone);
+    if (!phoneResult.valid) {
+      setMessage({ type: 'error', text: phoneResult.message || 'Geçerli bir telefon numarası girin' });
+      return;
+    }
+
+    setLookingUp(true);
+    setMessage(null);
+    try {
+      const { data, error } = await supabase.rpc('esnaf_musteri_telefon_ile_bul', {
+        p_phone: normalizePhoneInput(lookupPhone),
+      });
+      const r = data as any;
+      if (error) {
+        setMessage({ type: 'error', text: 'Müşteri aranamadı: ' + error.message });
+        return;
+      }
+      if (!r?.success) {
+        setMessage({ type: 'error', text: r?.error || 'Müşteri bulunamadı' });
+        return;
+      }
+
+      setCustomerInfo({
+        customer_id: r.customer_id,
+        customer_name: r.customer_name,
+        store_balance: Number(r.store_balance) || 0,
+        store_name: r.store_name,
+      });
+      setActionMode('idle');
+      setAmount('');
+      setLastResult(null);
+      setLookupPhone('');
+      toast.success('Müşteri Bulundu', r.customer_name);
+    } catch {
+      setMessage({ type: 'error', text: 'Bağlantı hatası. Lütfen tekrar deneyin.' });
+    } finally {
+      setLookingUp(false);
+    }
+  };
+
   const resetCustomer = () => {
     setCustomerInfo(null);
     setActionMode('idle');
@@ -1256,6 +1295,43 @@ export function MerchantPanel() {
           <div className="space-y-4">
             {!customerInfo ? (
               <>
+                {/* Müşteri Numarası ile Puan Yükle / Harca */}
+                {!showScanner && (
+                  <form
+                    onSubmit={handlePhoneLookup}
+                    className="bg-white rounded-2xl shadow-lg p-5 border-2 border-secondary-200"
+                  >
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="w-11 h-11 rounded-xl bg-secondary-100 flex items-center justify-center">
+                        <Phone className="w-5 h-5 text-secondary-700" />
+                      </div>
+                      <div>
+                        <h2 className="font-bold text-gray-800">Müşteri Numarası ile Puan Yükle / Harca</h2>
+                        <p className="text-xs text-gray-500">Telefon kullanamayan müşteriler için numarayı yazın</p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <input
+                        type="tel"
+                        inputMode="numeric"
+                        maxLength={PHONE_LENGTH}
+                        value={lookupPhone}
+                        onChange={(e) => setLookupPhone(normalizePhoneInput(e.target.value))}
+                        placeholder="05XX XXX XX XX"
+                        aria-label="Müşteri telefon numarası"
+                        className="flex-1 min-w-0 px-4 py-3.5 rounded-xl border-2 border-gray-200 focus:border-secondary-500 focus:ring-2 focus:ring-secondary-200 text-lg tracking-wider font-semibold"
+                      />
+                      <button
+                        type="submit"
+                        disabled={lookingUp || lookupPhone.length < PHONE_LENGTH}
+                        className="px-5 rounded-xl bg-secondary-500 text-primary-900 font-bold hover:bg-secondary-600 transition disabled:opacity-50 flex items-center gap-1.5"
+                      >
+                        {lookingUp ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Bul'}
+                      </button>
+                    </div>
+                  </form>
+                )}
+
                 {!showScanner ? (
                   <div className="bg-white rounded-2xl shadow-lg p-6 text-center border border-gray-100">
                     <div className="w-20 h-20 bg-gradient-to-br from-emerald-100 to-teal-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
@@ -1915,18 +1991,6 @@ export function MerchantPanel() {
                       className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm transition tracking-wide"
                     />
                     <p className="text-xs text-gray-400 mt-1">Başında 0 olacak şekilde 11 hane</p>
-                  </div>
-
-                  {/* E-posta Adresi */}
-                  <div>
-                    <label className="text-xs font-medium text-gray-500 mb-1.5 block">E-posta Adresi</label>
-                    <input
-                      type="email"
-                      value={profileForm.email}
-                      onChange={(e) => setProfileForm(prev => ({ ...prev, email: e.target.value }))}
-                      placeholder="ornek@email.com"
-                      className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm transition"
-                    />
                   </div>
 
                   {/* Yeni Şifre (Opsiyonel) */}

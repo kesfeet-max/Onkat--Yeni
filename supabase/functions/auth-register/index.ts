@@ -1,16 +1,22 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from 'npm:@supabase/supabase-js@2.57.4';
 
+/**
+ * Esnaf kaydı (telefon + şifre). E-posta istenmez; giriş için kullanıcıya
+ * gösterilmeyen dahili bir auth adresi üretilir.
+ *
+ * Müşteri kaydı bu fonksiyonla YAPILMAZ — müşteriler `customer-phone-auth`
+ * ile yalnızca ad soyad ve telefonla, şifresiz giriş/kayıt olur.
+ */
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
-interface RegisterRequest {
-  role: 'customer' | 'merchant';
+interface MerchantRegisterRequest {
   phone: string;
-  email: string;
   password: string;
   full_name: string;
   store_name?: string;
@@ -19,58 +25,33 @@ interface RegisterRequest {
   sector?: string;
   latitude?: number;
   longitude?: number;
-  kvkk_approved?: boolean;
-  terms_approved?: boolean;
 }
 
-/** Telefon numarasını "0XXXXXXXXXX" (11 hane) formatına normalize eder. */
+function json(body: Record<string, unknown>, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
 function normalizePhone(raw: string): string {
   let digits = (raw || '').replace(/\D/g, '');
   if (!digits) return '';
-
-  if (digits.startsWith('0090')) {
-    digits = digits.slice(4);
-  } else if (digits.startsWith('90') && digits.length > 11) {
-    digits = digits.slice(2);
-  }
-
-  digits = digits.replace(/^0+/, '0');
-
-  if (!digits.startsWith('0')) {
-    digits = `0${digits}`;
-  }
-
-  return digits.slice(0, 11);
+  if (digits.startsWith('0090')) digits = digits.slice(4);
+  else if (digits.startsWith('90') && digits.length > 11) digits = digits.slice(2);
+  digits = digits.replace(/^0+/, '');
+  return `0${digits}`.slice(0, 11);
 }
 
-/** Telefon numarasının geçerliliği: başında 0, toplam 11 hane. */
 function isValidPhone(value: string): boolean {
   return /^0[1-9][0-9]{9}$/.test(value);
 }
 
-/** Girdinin e-posta ya da e-posta benzeri olup olmadığını tespit eder. */
-function looksLikeEmail(value: string): boolean {
-  const text = (value || '').trim();
-  if (!text) return false;
-  if (text.includes('@')) return true;
-  if (/\(\s*at\s*\)|\[\s*at\s*\]/i.test(text)) return true;
-  if (/(gmail|hotmail|outlook|yahoo|icloud|yandex|mynet|proton|windowslive)/i.test(text)) return true;
-  if (/\.(com|net|org|edu|gov|info|io|co|tr|de|nl)\b/i.test(text)) return true;
-  return false;
-}
-
-/** Ad Soyad alanının geçerliliği: e-posta olamaz, rakam/geçersiz karakter içeremez. */
 function isValidFullName(value: string): boolean {
   const text = (value || '').trim().replace(/\s+/g, ' ');
-  if (!text) return false;
-  if (looksLikeEmail(text)) return false;
-  if (/\d/.test(text)) return false;
+  if (!text || text.includes('@') || /\d/.test(text)) return false;
   if (!/^[A-Za-zÇĞİÖŞÜçğıöşü\s'’.-]+$/.test(text)) return false;
-  if (text.replace(/[^A-Za-zÇĞİÖŞÜçğıöşü]/g, '').length < 3) return false;
-
-  const parts = text
-    .split(' ')
-    .filter((part) => part.replace(/[^A-Za-zÇĞİÖŞÜçğıöşü]/g, '').length >= 2);
+  const parts = text.split(' ').filter((p) => p.replace(/[^A-Za-zÇĞİÖŞÜçğıöşü]/g, '').length >= 2);
   return parts.length >= 2;
 }
 
@@ -78,278 +59,108 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
   }
-
   if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), {
-      status: 405, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return json({ error: "Method not allowed" }, 405);
   }
 
   try {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+      { auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false } },
+    );
 
-    const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-        detectSessionInUrl: false,
-      },
-    });
+    const body: MerchantRegisterRequest = await req.json();
+    const fullName = (body.full_name || '').trim().replace(/\s+/g, ' ');
+    const phone = normalizePhone(body.phone || '');
+    const password = body.password || '';
+    const storeName = (body.store_name || '').trim();
+    const city = (body.city || '').trim();
+    const district = (body.district || '').trim();
+    const sector = (body.sector || '').trim();
 
-    const body: RegisterRequest = await req.json();
-    console.log('Received registration request:', JSON.stringify(body, null, 2));
-
-    const { role, phone, email, password, full_name, store_name, city, district, sector, latitude, longitude, kvkk_approved, terms_approved } = body;
-
-    // Yasal onay kontrolü — her iki kutucuk da işaretlenmiş olmalı
-    if (!kvkk_approved || !terms_approved) {
-      return new Response(JSON.stringify({ error: "KVKK Aydınlatma Metni ve Müşteri Üyelik Koşulları onaylanmadan kayıt yapılamaz." }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    if (!isValidFullName(fullName)) {
+      return json({ error: "Lütfen geçerli bir ad ve soyad giriniz." }, 400);
+    }
+    if (!isValidPhone(phone)) {
+      return json({ error: "Telefon numarası, başında 0 olacak şekilde 11 haneli olmalıdır. Örn: 05074445588" }, 400);
+    }
+    if (password.length < 6) {
+      return json({ error: "Şifre en az 6 karakter olmalıdır" }, 400);
+    }
+    if (!storeName || !city || !district || !sector) {
+      return json({ error: "Dükkan adı, il, ilçe ve sektör alanları zorunludur" }, 400);
+    }
+    if (body.latitude === undefined || body.longitude === undefined) {
+      return json({ error: "Konum bilgisi gerekli" }, 400);
     }
 
-    // IP adresini al (yasal kayıt için)
-    const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() 
-      || req.headers.get('x-real-ip') 
-      || req.headers.get('cf-connecting-ip') 
-      || 'unknown';
-
-    // Validate required fields - check for empty/whitespace strings
-    const trimmedFullName = (full_name || '').trim().replace(/\s+/g, ' ');
-    const trimmedEmail = (email || '').trim().toLowerCase();
-    const trimmedPhone = (phone || '').trim();
-    const trimmedPassword = password || '';
-
-    const missingFields: string[] = [];
-    if (!role) missingFields.push('Rol');
-    if (!trimmedFullName) missingFields.push('Ad Soyad');
-    if (!trimmedPhone) missingFields.push('Telefon');
-    if (!trimmedEmail) missingFields.push('E-posta');
-    if (!trimmedPassword) missingFields.push('Şifre');
-
-    if (missingFields.length > 0) {
-      console.log('Missing fields:', missingFields.join(', '));
-      return new Response(JSON.stringify({ error: `Şu alanlar zorunludur: ${missingFields.join(', ')}` }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    const { data: existingMerchant } = await supabase
+      .from('merchants').select('id').eq('phone', phone).maybeSingle();
+    if (existingMerchant) {
+      return json({ error: "Bu telefon numarası zaten esnaf olarak kayıtlı" }, 400);
     }
 
-    // Ad Soyad doğrulaması — e-posta/mail benzeri veya geçersiz girdiler reddedilir
-    if (!isValidFullName(trimmedFullName)) {
-      return new Response(JSON.stringify({ error: "Lütfen geçerli bir ad ve soyad giriniz. Ad Soyad alanına e-posta adresi yazılamaz." }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    // Dahili giriş adresi — kullanıcıya hiçbir zaman gösterilmez
+    const internalEmail = `esnaf-${phone}@onkati.local`;
 
-    // Telefon doğrulaması — 0'sız girilse bile normalize edilir, sonuç 11 hane olmalı
-    const cleanedPhone = normalizePhone(trimmedPhone);
-    if (!isValidPhone(cleanedPhone)) {
-      return new Response(JSON.stringify({ error: "Telefon numarası, başında 0 olacak şekilde 11 haneli olmalıdır. Örn: 05074445588" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(trimmedEmail)) {
-      return new Response(JSON.stringify({ error: "Geçersiz e-posta adresi formatı" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // Validate password length
-    if (trimmedPassword.length < 6) {
-      return new Response(JSON.stringify({ error: "Şifre en az 6 karakter olmalıdır" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // Check existing records BEFORE creating auth user
-    if (role === 'customer') {
-      const { data: existingPhone } = await supabase
-        .from('customers').select('id').eq('phone', cleanedPhone).maybeSingle();
-
-      if (existingPhone) {
-        return new Response(JSON.stringify({ error: "Bu telefon numarası zaten müşteri olarak kayıtlı" }), {
-          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      const { data: existingEmail } = await supabase
-        .from('customers').select('id').eq('email', trimmedEmail).maybeSingle();
-
-      if (existingEmail) {
-        return new Response(JSON.stringify({ error: "Bu e-posta adresi zaten kayıtlı" }), {
-          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-    }
-
-    if (role === 'merchant') {
-      const trimmedStoreName = (store_name || '').trim();
-      const trimmedCity = (city || '').trim();
-      const trimmedDistrict = (district || '').trim();
-      const trimmedSector = (sector || '').trim();
-
-      if (!trimmedStoreName || !trimmedCity || !trimmedDistrict || !trimmedSector) {
-        return new Response(JSON.stringify({ error: "Dükkan adı, il, ilçe ve sektör alanları esnaf için zorunludur" }), {
-          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      if (latitude === undefined || longitude === undefined) {
-        return new Response(JSON.stringify({ error: "Konum bilgisi gerekli" }), {
-          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      const { data: existingMerchantPhone } = await supabase
-        .from('merchants').select('id').eq('phone', cleanedPhone).maybeSingle();
-
-      if (existingMerchantPhone) {
-        return new Response(JSON.stringify({ error: "Bu telefon numarası zaten esnaf olarak kayıtlı" }), {
-          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      const { data: existingMerchantEmail } = await supabase
-        .from('merchants').select('id').eq('email', trimmedEmail).maybeSingle();
-
-      if (existingMerchantEmail) {
-        return new Response(JSON.stringify({ error: "Bu e-posta adresi zaten esnaf olarak kayıtlı" }), {
-          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-    }
-
-    // Check if auth user already exists
-    const { data: existingUsers } = await supabase.auth.admin.listUsers();
-    const existingUser = existingUsers?.users?.find(u => u.email === trimmedEmail);
-
-    if (existingUser) {
-      return new Response(JSON.stringify({ error: "Bu e-posta adresi zaten kayıtlı" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // Create auth user with real email
     const { data: userResponse, error: authError } = await supabase.auth.admin.createUser({
-      email: trimmedEmail,
-      password: trimmedPassword,
+      email: internalEmail,
+      password,
       email_confirm: true,
-      user_metadata: {
-        phone: cleanedPhone,
-        role: role,
-        full_name: trimmedFullName,
-      },
+      user_metadata: { phone, role: 'merchant', full_name: fullName },
     });
 
     if (authError || !userResponse.user) {
       console.error('Auth error:', authError);
-      const errorMsg = authError?.message || 'Kullanıcı oluşturulamadı';
-      if (errorMsg.includes('already registered') || errorMsg.includes('already been registered')) {
-        return new Response(JSON.stringify({ error: "Bu e-posta adresi zaten kayıtlı" }), {
-          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+      const message = authError?.message || '';
+      if (message.includes('already')) {
+        return json({ error: "Bu telefon numarası ile zaten bir esnaf hesabı açılmış" }, 400);
       }
-      return new Response(JSON.stringify({ error: "Kayıt başarısız: " + errorMsg }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return json({ error: "Kayıt başarısız. Lütfen tekrar deneyin." }, 400);
     }
 
     const userId = userResponse.user.id;
 
-    if (role === 'customer') {
-      const { error: customerError } = await supabase
-        .from('customers')
-        .insert({
-          user_id: userId,
-          phone: cleanedPhone,
-          email: trimmedEmail,
-          full_name: trimmedFullName,
-          device_id: null,
-          points_balance: 0,
-          is_active: true,
-        });
-
-      if (customerError) {
-        console.error('Customer insert error:', customerError);
-        await supabase.auth.admin.deleteUser(userId);
-        return new Response(JSON.stringify({ error: "Müşteri kaydı oluşturulamadı: " + customerError.message }), {
-          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      // Yasal onay kaydını logla (müşteri)
-      await supabase.from('consent_logs').insert({
-        user_id: userId,
-        kvkk_approved_at: new Date().toISOString(),
-        terms_approved_at: new Date().toISOString(),
-        ip_address: clientIp,
-        user_agent: req.headers.get('user-agent') || 'unknown',
-        role: 'customer',
-      });
-
-      console.log('Customer created successfully:', userId);
-      return new Response(JSON.stringify({ success: true, message: "Kayıt başarılı", user_id: userId }), {
-        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    if (role === 'merchant') {
-      const { error: merchantError } = await supabase
-        .from('merchants')
-        .insert({
-          user_id: userId,
-          phone: cleanedPhone,
-          email: trimmedEmail,
-          full_name: trimmedFullName,
-          store_name: store_name!.trim(),
-          city: city!.trim(),
-          district: district!.trim(),
-          sector: sector!.trim(),
-          latitude: latitude!,
-          longitude: longitude!,
-          total_revenue: 0,
-          total_points_distributed: 0,
-          total_customers: 0,
-          is_active: true,
-          points_rate: 7,
-        });
-
-      if (merchantError) {
-        console.error('Merchant insert error:', merchantError);
-        await supabase.auth.admin.deleteUser(userId);
-        return new Response(JSON.stringify({ error: "Esnaf kaydı oluşturulamadı: " + merchantError.message }), {
-          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      // Yasal onay kaydını logla (esnaf)
-      await supabase.from('consent_logs').insert({
-        user_id: userId,
-        kvkk_approved_at: new Date().toISOString(),
-        esnaf_terms_approved_at: new Date().toISOString(),
-        ip_address: clientIp,
-        user_agent: req.headers.get('user-agent') || 'unknown',
-        role: 'merchant',
-      });
-
-      console.log('Merchant created successfully:', userId);
-      return new Response(JSON.stringify({ success: true, message: "Kayıt başarılı", user_id: userId }), {
-        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    return new Response(JSON.stringify({ error: "Geçersiz rol" }), {
-      status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    const { error: merchantError } = await supabase.from('merchants').insert({
+      user_id: userId,
+      phone,
+      full_name: fullName,
+      store_name: storeName,
+      city,
+      district,
+      sector,
+      latitude: body.latitude,
+      longitude: body.longitude,
+      total_revenue: 0,
+      total_points_distributed: 0,
+      total_customers: 0,
+      is_active: true,
+      points_rate: 7,
     });
 
+    if (merchantError) {
+      console.error('Merchant insert error:', merchantError);
+      await supabase.auth.admin.deleteUser(userId);
+      return json({ error: "Esnaf kaydı oluşturulamadı: " + merchantError.message }, 500);
+    }
+
+    const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+      || req.headers.get('x-real-ip')
+      || 'unknown';
+
+    await supabase.from('consent_logs').insert({
+      user_id: userId,
+      kvkk_approved_at: new Date().toISOString(),
+      esnaf_terms_approved_at: new Date().toISOString(),
+      ip_address: clientIp,
+      user_agent: req.headers.get('user-agent') || 'unknown',
+      role: 'merchant',
+    });
+
+    return json({ success: true, message: "Kayıt başarılı", user_id: userId });
   } catch (error) {
     console.error('Registration error:', error);
-    return new Response(JSON.stringify({ error: "Sunucu hatası: " + (error instanceof Error ? error.message : 'Bilinmeyen hata') }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return json({ error: "Sunucu hatası: " + (error instanceof Error ? error.message : 'Bilinmeyen hata') }, 500);
   }
 });

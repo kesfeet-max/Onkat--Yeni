@@ -1,22 +1,14 @@
-import { useState } from 'react';
 import {
-  Copy,
-  Check,
-  Building2,
   MessageCircle,
   CalendarClock,
   ShieldCheck,
   AlertTriangle,
   Banknote,
   Sparkles,
-  Info,
 } from 'lucide-react';
 import { TRIAL_DAYS, formatTrDate, type MerchantSubscriptionState } from '../lib/subscription';
 
-/** Havale / EFT bilgileri — sistemde BAŞKA hiçbir ödeme yöntemi yoktur. */
-const BANK_NAME = 'İş Bankası';
-const ACCOUNT_HOLDER = 'Mustafa Koçak';
-const IBAN = 'TR02 0006 4000 0014 5030 8033 64';
+/** Ödeme onayı iletişim kanalı. */
 const WHATSAPP_NUMBER = '905073376385';
 
 interface SubscriptionTabProps {
@@ -25,44 +17,6 @@ interface SubscriptionTabProps {
   fullName: string;
   /** Merkezî hesaplanan abonelik durumu (eksik DB alanlarına karşı güvenli). */
   subscription: MerchantSubscriptionState;
-}
-
-function CopyRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(value.replace(/\s+/g, ' ').trim());
-    } catch {
-      const el = document.createElement('textarea');
-      el.value = value;
-      document.body.appendChild(el);
-      el.select();
-      document.execCommand('copy');
-      document.body.removeChild(el);
-    }
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1800);
-  };
-
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-3 py-2.5">
-      <div className="min-w-0">
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">{label}</p>
-        <p className={`truncate text-sm font-bold text-gray-800 ${mono ? 'font-mono tracking-tight' : ''}`}>
-          {value}
-        </p>
-      </div>
-      <button
-        type="button"
-        onClick={handleCopy}
-        className="flex shrink-0 items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700"
-      >
-        {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-        {copied ? 'Kopyalandı' : 'Kopyala'}
-      </button>
-    </div>
-  );
 }
 
 export function SubscriptionTab({ storeCode, storeName, fullName, subscription }: SubscriptionTabProps) {
@@ -76,7 +30,7 @@ export function SubscriptionTab({ storeCode, storeName, fullName, subscription }
   const paidUntilText = subscription.paidUntilDate ? formatTrDate(subscription.paidUntilDate) : null;
 
   const whatsappHref = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(
-    `Merhaba, ödememi Havale/EFT ile yaptım. Dekontumu gönderiyorum.\n\nAd Soyad: ${fullName}\nİşletme: ${storeName}\nMağaza Kodu: ${storeCode}`
+    `Merhaba, abonelik ödememi tamamladım. Dekontumu gönderiyorum.\n\nAd Soyad: ${fullName}\nİşletme: ${storeName}\nMağaza Kodu: ${storeCode}`
   )}`;
 
   return (
@@ -140,32 +94,26 @@ export function SubscriptionTab({ storeCode, storeName, fullName, subscription }
       <div className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-4 shadow-sm">
         <div className="mb-2 flex items-center gap-2">
           <Sparkles className="h-5 w-5 text-amber-500" />
-          <h3 className="text-base font-bold text-gray-800">Kampanya Fiyatlarımız</h3>
+          <h3 className="text-base font-bold text-gray-800">Esnaf Yıllık Kurumsal Paket</h3>
         </div>
         <p className="mb-3 text-sm font-medium text-gray-700">
-          “1 aylık ücretsiz deneme süreniz sona erdiğinde veya sistemden kesintisiz faydalanmak için kampanya
-          fiyatlarımız:”
+          1 aylık ücretsiz deneme süreniz sona erdiğinde, yıl boyunca geçerli tek ve sabit fiyat:
         </p>
         <div className="space-y-2">
           <div className="flex items-center justify-between rounded-xl border-2 border-amber-300 bg-white px-3 py-3">
             <div>
-              <p className="text-sm font-bold text-gray-800">İlk 6 Ay</p>
-              <p className="text-xs text-gray-500">Kampanyalı özel fiyat</p>
+              <p className="text-sm font-bold text-gray-800">Yıllık Paket</p>
+              <p className="text-xs text-gray-500">Aylık sadece 250 TL'ye denk gelir</p>
             </div>
             <div className="text-right">
-              <p className="text-2xl font-extrabold text-amber-600">500 TL</p>
-              <p className="text-[11px] font-semibold text-gray-400">/ ay</p>
+              <p className="text-2xl font-extrabold text-amber-600">3.000 TL</p>
+              <p className="text-[11px] font-semibold text-gray-400">/ yıl</p>
             </div>
           </div>
-          <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-3 py-3">
-            <div>
-              <p className="text-sm font-bold text-gray-800">Sonraki Aylar</p>
-              <p className="text-xs text-gray-500">Standart abonelik</p>
-            </div>
-            <div className="text-right">
-              <p className="text-2xl font-extrabold text-gray-700">1000 TL</p>
-              <p className="text-[11px] font-semibold text-gray-400">/ ay</p>
-            </div>
+          <div className="rounded-xl bg-amber-50 px-3 py-2">
+            <p className="text-xs leading-relaxed text-amber-900">
+              1 yıl boyunca tüm özellikler sınırsız açık. Sürpriz ek maliyet ve ciro üzerinden komisyon yok.
+            </p>
           </div>
         </div>
       </div>
@@ -175,31 +123,8 @@ export function SubscriptionTab({ storeCode, storeName, fullName, subscription }
         <p className="text-[11px] font-bold uppercase tracking-widest text-emerald-100">Mağaza Kodunuz</p>
         <p className="my-1 font-mono text-3xl font-extrabold uppercase tracking-widest text-white">{storeCode}</p>
         <p className="text-xs font-semibold text-emerald-50">
-          Havale / EFT açıklama kısmına MUTLAKA bu kodu yazmanız gerekmektedir.
+          Mağaza kodunuzu ödeme ve destek görüşmelerinde kullanabilirsiniz.
         </p>
-      </div>
-
-      {/* Havale / EFT bilgileri — TEK ödeme yöntemi */}
-      <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
-        <div className="mb-1 flex items-center gap-2">
-          <Building2 className="h-5 w-5 text-emerald-600" />
-          <h3 className="text-base font-bold text-gray-800">Havale / EFT ile Ödeme</h3>
-        </div>
-        <p className="mb-3 text-xs font-semibold text-emerald-700">Sistemdeki tek ödeme yöntemidir.</p>
-        <div className="space-y-2">
-          <CopyRow label="Banka" value={BANK_NAME} />
-          <CopyRow label="Alıcı Adı" value={ACCOUNT_HOLDER} />
-          <CopyRow label="IBAN" value={IBAN} mono />
-          <CopyRow label="Açıklama (Zorunlu)" value={storeCode} mono />
-        </div>
-
-        <div className="mt-3 flex items-start gap-2 rounded-xl bg-blue-50 p-3">
-          <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
-          <p className="text-xs leading-relaxed text-blue-800">
-            Ödemenizi yaptıktan sonra dekontunuzu WhatsApp üzerinden gönderin. Havale kontrolü yapıldıktan sonra
-            hesabınız yetkilimiz tarafından aktif edilir.
-          </p>
-        </div>
       </div>
 
       {/* Kredi kartı yasağı bilgilendirmesi */}
@@ -211,7 +136,7 @@ export function SubscriptionTab({ storeCode, storeName, fullName, subscription }
             <p className="mt-1 text-xs leading-relaxed text-gray-600">
               Kart güvenliği ve yeni kayıt sürecimiz gereği panelimizde kredi kartı, banka kartı çekim formu veya
               herhangi bir online kart ödeme modülü <span className="font-bold">bulunmamaktadır</span>. Kart bilgileriniz
-              hiçbir şekilde talep edilmez. Ödemeler yalnızca yukarıdaki Havale / EFT bilgileri ile yapılır.
+              hiçbir şekilde talep edilmez. Ödeme ve abonelik işlemleri için yetkili ekibimizle iletişime geçebilirsiniz.
             </p>
           </div>
         </div>

@@ -8,10 +8,10 @@
  * - actions KULLANILMIYOR — bazı tarayıcılarda "URL kopyala" tetikler
  */
 
-const CACHE_VERSION = 'onkati-v6';
+const CACHE_VERSION = 'onkati-v7';
 
 /** Yeni PWA logosu — koyu (#1d1d1d) zeminli kare PNG (PWA ikonu ve bildirim ikonu) */
-const APP_ICON = '/assets/onkati-pwa-192.png?v=3';
+const APP_ICON = '/assets/onkati-pwa-192.png?v=4';
 
 const STATIC_ASSETS = [
   '/',
