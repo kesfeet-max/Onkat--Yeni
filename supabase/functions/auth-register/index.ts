@@ -23,8 +23,6 @@ interface MerchantRegisterRequest {
   city?: string;
   district?: string;
   sector?: string;
-  latitude?: number;
-  longitude?: number;
 }
 
 function json(body: Record<string, unknown>, status = 200): Response {
@@ -91,9 +89,6 @@ Deno.serve(async (req: Request) => {
     if (!storeName || !city || !district || !sector) {
       return json({ error: "Dükkan adı, il, ilçe ve sektör alanları zorunludur" }, 400);
     }
-    if (body.latitude === undefined || body.longitude === undefined) {
-      return json({ error: "Konum bilgisi gerekli" }, 400);
-    }
 
     const { data: existingMerchant } = await supabase
       .from('merchants').select('id').eq('phone', phone).maybeSingle();
@@ -130,8 +125,9 @@ Deno.serve(async (req: Request) => {
       city,
       district,
       sector,
-      latitude: body.latitude,
-      longitude: body.longitude,
+      // Konum toplanmaz; tablo kolonu zorunlu olduğu için nötr değer yazılır.
+      latitude: 0,
+      longitude: 0,
       total_revenue: 0,
       total_points_distributed: 0,
       total_customers: 0,

@@ -31,32 +31,6 @@ export function getDeviceId(): string {
   return newId;
 }
 
-export async function getCurrentLocation(): Promise<{ latitude: number; longitude: number } | null> {
-  return new Promise((resolve) => {
-    if (!navigator.geolocation) {
-      resolve(null);
-      return;
-    }
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        resolve({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-        });
-      },
-      () => {
-        resolve(null);
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 0,
-      }
-    );
-  });
-}
-
 export function validatePhoneNumber(phone: string): boolean {
   const cleaned = phone.replace(/\D/g, '');
   return cleaned.length === 10 || cleaned.length === 11;

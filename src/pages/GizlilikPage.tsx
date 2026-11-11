@@ -38,11 +38,10 @@ export function GizlilikPage() {
                 artırılması dışında kullanılmaz. Toplanan bilgiler şunları içerebilir:
               </p>
               <ul className="list-disc list-inside text-gray-700 mt-2 space-y-1">
-                <li>Kimlik bilgileri (ad, soyad, e-posta, telefon)</li>
-                <li>İşletme bilgileri (esnaflar için mağaza adı, konum, sektör)</li>
+                <li>Kimlik bilgileri (ad, soyad, telefon)</li>
+                <li>İşletme bilgileri (esnaflar için mağaza adı, il/ilçe, sektör)</li>
                 <li>İşlem verileri (puan kazanma/harcama geçmişi)</li>
                 <li>Teknik veriler (IP adresi, tarayıcı bilgisi, cihaz türü)</li>
-                <li>Konum verileri (işlem güvenliği için GPS koordinatları)</li>
               </ul>
             </section>
 

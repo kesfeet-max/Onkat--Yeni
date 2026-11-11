@@ -2,9 +2,8 @@ import { useState, useEffect } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { BrandLogo } from '../components/BrandLogo';
 import { CustomerPhoneAuthForm } from '../components/CustomerPhoneAuthForm';
-import { Phone, Lock, User, Building2, MapPin, AlertCircle, Store, Eye, EyeOff, CheckCircle } from 'lucide-react';
+import { Phone, Lock, User, Building2, AlertCircle, Store, Eye, EyeOff, CheckCircle } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
-import { getCurrentLocation } from '../lib/utils';
 import {
   PHONE_LENGTH,
   normalizePhoneInput,
@@ -35,7 +34,6 @@ function MerchantRegisterForm() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [isLocating, setIsLocating] = useState(true);
   const [form, setForm] = useState({
     full_name: '',
     phone: '',
@@ -44,16 +42,7 @@ function MerchantRegisterForm() {
     city: '',
     district: '',
     sector: '',
-    latitude: 0,
-    longitude: 0,
   });
-
-  useEffect(() => {
-    getCurrentLocation().then((location) => {
-      if (location) setForm((prev) => ({ ...prev, latitude: location.latitude, longitude: location.longitude }));
-      setIsLocating(false);
-    });
-  }, []);
 
   const update = (key: keyof typeof form, value: string) => setForm((prev) => ({ ...prev, [key]: value }));
 
@@ -69,6 +58,7 @@ function MerchantRegisterForm() {
 
     setLoading(true);
     try {
+      const cleanedPhone = normalizePhoneInput(form.phone);
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/auth-register`, {
         method: 'POST',
         headers: {
@@ -78,8 +68,17 @@ function MerchantRegisterForm() {
         },
         body: JSON.stringify({
           ...form,
-          phone: normalizePhoneInput(form.phone),
+          phone: cleanedPhone,
           full_name: normalizeFullName(form.full_name),
+          // Kullanıcıya e-posta sorulmaz; eski sunucu sürümüyle uyumluluk için
+          // rol ve dahili (gösterilmeyen) giriş adresi otomatik gönderilir.
+          role: 'merchant',
+          email: `esnaf-${cleanedPhone}@onkati.local`,
+          // Konum istenmez; eski sunucu sürümü alanı beklediği için nötr değer gönderilir.
+          latitude: 0,
+          longitude: 0,
+          kvkk_approved: true,
+          terms_approved: true,
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -206,17 +205,6 @@ function MerchantRegisterForm() {
         </select>
       </div>
 
-      <div className="p-3.5 bg-blue-50 border border-blue-200 rounded-xl flex items-center gap-2 text-sm text-blue-800 font-medium">
-        <MapPin className="w-4 h-4 flex-shrink-0" />
-        {isLocating ? (
-          <span>Konumunuz belirleniyor...</span>
-        ) : form.latitude ? (
-          <span>Konum: {form.latitude.toFixed(5)}, {form.longitude.toFixed(5)}</span>
-        ) : (
-          <span className="text-red-600">Konum erişimi gerekli. Tarayıcı izinlerini kontrol edin.</span>
-        )}
-      </div>
-
       <p className="text-[11px] sm:text-xs text-gray-500 leading-relaxed text-center">
         Kaydolarak{' '}
         <a href="/yasal/kvkk" target="_blank" rel="noopener noreferrer" className="text-primary-600 font-semibold underline">KVKK Aydınlatma Metni</a>{' '}
@@ -227,7 +215,7 @@ function MerchantRegisterForm() {
 
       <button
         type="submit"
-        disabled={loading || !form.latitude}
+        disabled={loading}
         className="w-full bg-secondary-500 text-primary-900 py-4 rounded-xl font-bold hover:bg-secondary-600 transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {loading ? 'Kaydediliyor...' : 'Esnaf Kaydını Tamamla'}
