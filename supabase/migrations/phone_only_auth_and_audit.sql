@@ -304,4 +304,73 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.musteri_islem_gecmisi(integer) TO authenticated;
 
+-- ---------------------------------------------------------------------------
+-- 7. Kasiyer: müşteri numarası ile müşteri bul
+--    Yalnızca çağıran kullanıcıya ait, aktif kasiyer kaydı ve aktif dükkan
+--    için çalışır. Ad soyad + o dükkandaki güncel puan döner.
+-- ---------------------------------------------------------------------------
+DROP FUNCTION IF EXISTS public.kasiyer_musteri_telefon_ile_bul(uuid, text);
+
+CREATE OR REPLACE FUNCTION public.kasiyer_musteri_telefon_ile_bul(p_cashier_id uuid, p_phone text)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_phone    text := public.onkati_normalize_phone(p_phone);
+  v_cashier  RECORD;
+  v_customer RECORD;
+  v_balance  numeric := 0;
+BEGIN
+  SELECT c.id, c.merchant_id, m.store_name
+    INTO v_cashier
+    FROM public.cashiers c
+    JOIN public.merchants m ON m.id = c.merchant_id
+   WHERE c.id = p_cashier_id
+     AND c.user_id = auth.uid()
+     AND c.is_active = true
+     AND m.is_active = true
+   LIMIT 1;
+
+  IF v_cashier.id IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Kasiyer yetkisi bulunamadı');
+  END IF;
+
+  IF v_phone !~ '^0[1-9][0-9]{9}$' THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Geçerli bir telefon numarası girin (Örn: 05074445588)');
+  END IF;
+
+  SELECT id, full_name, is_active
+    INTO v_customer
+    FROM public.customers
+   WHERE phone = v_phone
+   LIMIT 1;
+
+  IF v_customer.id IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Bu numarayla kayıtlı müşteri bulunamadı');
+  END IF;
+
+  IF v_customer.is_active = false THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Müşteri hesabı askıya alınmış');
+  END IF;
+
+  SELECT COALESCE(balance, 0)
+    INTO v_balance
+    FROM public.store_customer_balances
+   WHERE customer_id = v_customer.id
+     AND merchant_id = v_cashier.merchant_id;
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'customer_id', v_customer.id,
+    'customer_name', v_customer.full_name,
+    'store_balance', COALESCE(v_balance, 0),
+    'store_name', v_cashier.store_name
+  );
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.kasiyer_musteri_telefon_ile_bul(uuid, text) TO authenticated;
+
 COMMIT;

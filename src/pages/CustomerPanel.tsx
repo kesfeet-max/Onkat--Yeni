@@ -24,6 +24,7 @@ import {
   Bell,
   Megaphone,
   CalendarDays,
+  Phone,
 } from 'lucide-react';
 import { BrandLogo } from '../components/BrandLogo';
 import { scrollWindowToTop } from '../components/ScrollToTop';
@@ -96,7 +97,10 @@ export function CustomerPanel() {
   const [cashierMode, setCashierMode] = useState(false);
   const [selectedAssignment, setSelectedAssignment] = useState<CashierAssignment | null>(null);
   const [cashierScanning, setCashierScanning] = useState(false);
-  const [cashierCustomer, setCashierCustomer] = useState<{ id: string; name: string } | null>(null);
+  const [cashierCustomer, setCashierCustomer] = useState<{ id: string; name: string; balance?: number } | null>(null);
+  const [cashierLookupPhone, setCashierLookupPhone] = useState('');
+  const [cashierLookingUp, setCashierLookingUp] = useState(false);
+  const [cashierLookupError, setCashierLookupError] = useState<string | null>(null);
   const [cashierAmount, setCashierAmount] = useState('');
   const [cashierPaymentType, setCashierPaymentType] = useState<'cash' | 'card'>('cash');
   const [cashierPointsToSpend, setCashierPointsToSpend] = useState('');
@@ -640,6 +644,45 @@ export function CustomerPanel() {
     }
   }, []);
 
+  /** Kasiyer, telefon kullanamayan müşterinin numarasını yazarak müşteriyi bulur. */
+  const handleCashierPhoneLookup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedAssignment) return;
+
+    const phoneResult = validatePhone(cashierLookupPhone);
+    if (!phoneResult.valid) {
+      setCashierLookupError(phoneResult.message || 'Geçerli bir telefon numarası girin');
+      return;
+    }
+
+    setCashierLookingUp(true);
+    setCashierLookupError(null);
+    try {
+      const { data, error } = await supabase.rpc('kasiyer_musteri_telefon_ile_bul', {
+        p_cashier_id: selectedAssignment.cashier_id,
+        p_phone: normalizePhoneInput(cashierLookupPhone),
+      });
+      const r = data as any;
+      if (error) {
+        setCashierLookupError('Müşteri aranamadı: ' + error.message);
+        return;
+      }
+      if (!r?.success) {
+        setCashierLookupError(r?.error || 'Müşteri bulunamadı');
+        return;
+      }
+
+      await stopCashierScanner();
+      setCashierResult(null);
+      setCashierCustomer({ id: r.customer_id, name: r.customer_name, balance: Number(r.store_balance) || 0 });
+      setCashierLookupPhone('');
+    } catch {
+      setCashierLookupError('Bağlantı hatası. Lütfen tekrar deneyin.');
+    } finally {
+      setCashierLookingUp(false);
+    }
+  };
+
   const handleCashierEarn = async () => {
     if (!selectedAssignment || !cashierCustomer) return;
     const amount = parseFloat(cashierAmount);
@@ -774,6 +817,49 @@ export function CustomerPanel() {
         </header>
 
         <main className="p-4 pb-24 max-w-lg mx-auto space-y-4">
+          {/* Müşteri Numarası ile Puan Yükle / Harca */}
+          {!cashierCustomer && !cashierScanning && (
+            <form
+              onSubmit={handleCashierPhoneLookup}
+              className="bg-white rounded-2xl shadow-lg p-5 border-2 border-indigo-100"
+            >
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-11 h-11 rounded-xl bg-indigo-50 flex items-center justify-center">
+                  <Phone className="w-5 h-5 text-indigo-600" />
+                </div>
+                <div>
+                  <h2 className="font-bold text-gray-800">Müşteri Numarası ile Puan Yükle / Harca</h2>
+                  <p className="text-xs text-gray-500">Telefon kullanamayan müşteriler için numarayı yazın</p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="tel"
+                  inputMode="numeric"
+                  maxLength={PHONE_LENGTH}
+                  value={cashierLookupPhone}
+                  onChange={(e) => {
+                    setCashierLookupPhone(normalizePhoneInput(e.target.value));
+                    setCashierLookupError(null);
+                  }}
+                  placeholder="05XX XXX XX XX"
+                  aria-label="Müşteri telefon numarası"
+                  className="flex-1 min-w-0 px-4 py-3.5 rounded-xl border-2 border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 text-lg tracking-wider font-semibold"
+                />
+                <button
+                  type="submit"
+                  disabled={cashierLookingUp || cashierLookupPhone.length < PHONE_LENGTH}
+                  className="px-5 rounded-xl bg-indigo-600 text-white font-bold hover:bg-indigo-700 transition disabled:opacity-50 flex items-center"
+                >
+                  {cashierLookingUp ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Bul'}
+                </button>
+              </div>
+              {cashierLookupError && (
+                <p className="mt-2 text-sm text-red-600 font-medium">{cashierLookupError}</p>
+              )}
+            </form>
+          )}
+
           {/* Müşteri QR Tarama */}
           {!cashierCustomer && (
             <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100">
@@ -866,6 +952,14 @@ export function CustomerPanel() {
                     <p className="text-xs text-gray-500">Müşteri doğrulandı</p>
                   </div>
                 </div>
+                {cashierCustomer.balance !== undefined && (
+                  <div className="mt-4 rounded-xl bg-indigo-50 border border-indigo-100 p-3">
+                    <p className="text-xs font-medium text-indigo-700">Bu dükkandaki güncel puanı</p>
+                    <p className="text-2xl font-black text-indigo-900">
+                      {cashierCustomer.balance.toFixed(2)} <span className="text-sm font-semibold">Puan</span>
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* İşlem Tipi Seçimi */}
