@@ -12,6 +12,25 @@ import {
   validatePhone,
 } from '../lib/validation';
 
+const TERMS_URL = 'https://onkati.com/yasal/musteri-kosullari';
+const KVKK_URL = 'https://onkati.com/yasal/kvkk';
+const CONSENT_REQUIRED_MESSAGE = 'Devam etmek için sözleşme ve KVKK onay kutucuğunu işaretlemelisiniz.';
+
+/** Yasal metni yeni sekmede açan, mobilde rahat dokunulabilen bağlantı. */
+function LegalLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={(e) => e.stopPropagation()}
+      className="inline-block py-1 -my-1 font-semibold text-primary-700 [.dark_&]:text-secondary-400 underline decoration-2 decoration-primary-300 [.dark_&]:decoration-secondary-500/60 underline-offset-4 rounded-sm hover:text-primary-800 [.dark_&]:hover:text-secondary-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+    >
+      {children}
+    </a>
+  );
+}
+
 /**
  * Müşteri için tek ekranlık giriş / kayıt formu.
  *
@@ -27,6 +46,8 @@ export function CustomerPhoneAuthForm() {
   const [phone, setPhone] = useState('');
   const [nameError, setNameError] = useState<string | null>(null);
   const [phoneError, setPhoneError] = useState<string | null>(null);
+  const [consent, setConsent] = useState(false);
+  const [consentError, setConsentError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -38,7 +59,9 @@ export function CustomerPhoneAuthForm() {
     const phoneResult = validatePhone(phone);
     setNameError(nameResult.valid ? null : nameResult.message ?? null);
     setPhoneError(phoneResult.valid ? null : phoneResult.message ?? null);
-    if (!nameResult.valid || !phoneResult.valid) return;
+    setConsentError(consent ? null : CONSENT_REQUIRED_MESSAGE);
+    if (!consent) toast.error(CONSENT_REQUIRED_MESSAGE);
+    if (!nameResult.valid || !phoneResult.valid || !consent) return;
 
     setLoading(true);
     const result = await signInCustomerWithPhone(normalizePhoneInput(phone), normalizeFullName(fullName));
@@ -115,6 +138,47 @@ export function CustomerPhoneAuthForm() {
         {phoneError && <p className="text-xs text-red-600 mt-1.5 font-semibold">{phoneError}</p>}
       </div>
 
+      <div>
+        <label
+          htmlFor="customer-legal-consent"
+          className={`flex items-start gap-3 p-4 rounded-xl border-2 cursor-pointer transition-colors bg-gray-50 [.dark_&]:bg-slate-800/70 ${
+            consentError
+              ? 'border-red-400 [.dark_&]:border-red-500/70'
+              : consent
+                ? 'border-primary-500 [.dark_&]:border-emerald-500/60'
+                : 'border-gray-200 [.dark_&]:border-slate-700'
+          }`}
+        >
+          <input
+            id="customer-legal-consent"
+            type="checkbox"
+            required
+            checked={consent}
+            onChange={(e) => {
+              setConsent(e.target.checked);
+              if (e.target.checked) setConsentError(null);
+            }}
+            aria-invalid={Boolean(consentError)}
+            aria-describedby={consentError ? 'customer-legal-consent-error' : undefined}
+            className="mt-0.5 w-6 h-6 flex-shrink-0 rounded-md border-gray-300 accent-primary-600 cursor-pointer"
+          />
+          <span className="text-sm text-gray-700 [.dark_&]:text-slate-300 leading-relaxed">
+            Kayıt olarak{' '}
+            <LegalLink href={TERMS_URL}>Kullanım Koşulları</LegalLink>'nı ve{' '}
+            <LegalLink href={KVKK_URL}>KVKK Aydınlatma Metni</LegalLink>'ni okudum ve onaylıyorum.
+          </span>
+        </label>
+        {consentError && (
+          <p
+            id="customer-legal-consent-error"
+            role="alert"
+            className="text-xs text-red-600 [.dark_&]:text-red-400 mt-1.5 font-semibold"
+          >
+            {consentError}
+          </p>
+        )}
+      </div>
+
       <button
         type="submit"
         disabled={loading}
@@ -126,7 +190,7 @@ export function CustomerPhoneAuthForm() {
             Giriş yapılıyor...
           </>
         ) : (
-          'Devam Et'
+          'Kayıt Ol / Giriş Yap'
         )}
       </button>
 
