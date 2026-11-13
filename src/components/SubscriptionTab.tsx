@@ -76,7 +76,7 @@ export function SubscriptionTab({ storeCode, storeName, fullName, subscription }
         <div className="grid grid-cols-2 gap-2">
           <div className="rounded-xl bg-gray-50 p-3">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Deneme Süresi</p>
-            <p className="text-sm font-bold text-gray-800">1 Ay ({TRIAL_DAYS} Gün)</p>
+            <p className="text-sm font-bold text-gray-800">{TRIAL_DAYS} Gün</p>
           </div>
           <div className="rounded-xl bg-gray-50 p-3">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Bitiş Tarihi</p>
@@ -84,7 +84,7 @@ export function SubscriptionTab({ storeCode, storeName, fullName, subscription }
           </div>
         </div>
         <p className="mt-3 text-xs leading-relaxed text-gray-500">
-          Sisteme kayıt olduğunuz günden itibaren 30 gün boyunca tam yetkili ve aktif olarak kullanırsınız.
+          Sisteme kayıt olduğunuz günden itibaren {TRIAL_DAYS} gün boyunca tam yetkili ve aktif olarak kullanırsınız.
           Deneme süreniz bittiğinde paneliniz otomatik olarak kapanmaz, işlemlerinize devam edebilirsiniz. Ancak
           abonelik ödemenizi yapmadığınız takdirde hesabınız kontrol sonrası yetkilimiz tarafından kapatılabilir.
         </p>
@@ -97,7 +97,7 @@ export function SubscriptionTab({ storeCode, storeName, fullName, subscription }
           <h3 className="text-base font-bold text-gray-800">Esnaf Yıllık Kurumsal Paket</h3>
         </div>
         <p className="mb-3 text-sm font-medium text-gray-700">
-          1 aylık ücretsiz deneme süreniz sona erdiğinde, yıl boyunca geçerli tek ve sabit fiyat:
+          {TRIAL_DAYS} günlük ücretsiz deneme süreniz sona erdiğinde, yıl boyunca geçerli tek ve sabit fiyat:
         </p>
         <div className="space-y-2">
           <div className="flex items-center justify-between rounded-xl border-2 border-amber-300 bg-white px-3 py-3">

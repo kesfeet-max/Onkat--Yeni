@@ -602,7 +602,7 @@ const FAQ_ITEMS = [
     icon: HandCoins,
     question: 'Sistemde komisyon veya gizli masraf var mı?',
     answer:
-      'Kesinlikle ciro üzerinden alınan bir POS komisyonu yoktur! Esnaflarımızdan kazancından kesinti yapılmaz. Sistem, esnaflarımız için ilk 1 ay tamamen ücretsizdir; sonrasında ise sadece cüzi bir sabit aylık abonelik ücreti ile kullanılmaya devam eder. Müşteriler için ise uygulama tamamen ücretsizdir.'
+      'Kesinlikle ciro üzerinden alınan bir POS komisyonu yoktur! Esnaflarımızdan kazancından kesinti yapılmaz. Sistem, esnaflarımız için ilk 14 gün tamamen ücretsizdir; sonrasında ise sadece cüzi bir sabit aylık abonelik ücreti ile kullanılmaya devam eder. Müşteriler için ise uygulama tamamen ücretsizdir.'
   },
   {
     icon: ShieldCheck,

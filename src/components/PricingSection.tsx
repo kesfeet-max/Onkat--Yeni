@@ -12,16 +12,16 @@ import {
 
 /**
  * Esnafa özel tekil kurumsal paket modeli.
- * Karmaşık kademeli tablo yerine iki net adım: ücretsiz ilk ay + yıllık paket.
+ * Karmaşık kademeli tablo yerine iki net adım: ücretsiz ilk 14 gün + yıllık paket.
  */
 const PLAN_STEPS = [
   {
     step: '1. Adım',
-    title: 'İlk 1 Ay Tamamen Ücretsiz',
+    title: 'İlk 14 Gün Tamamen Ücretsiz',
     price: '0 TL',
-    priceNote: 'ilk ay',
+    priceNote: 'ilk 14 gün',
     tagline: 'Riski olmayan başlangıç',
-    description: 'Tüm özellikleri bir ay boyunca hiçbir ödeme yapmadan, taahhüt almadan deneyin.',
+    description: 'Tüm özellikleri 14 gün boyunca hiçbir ödeme yapmadan, taahhüt almadan deneyin.',
     perks: ['Kredi kartı gerekmez', 'Risk yok, taahhüt yok', 'Dilediğin zaman bırak'],
     featured: false,
     icon: Gift,

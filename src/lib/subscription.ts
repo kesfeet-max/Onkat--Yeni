@@ -13,7 +13,7 @@
  */
 
 /** Ücretsiz deneme süresi (gün) */
-export const TRIAL_DAYS = 30;
+export const TRIAL_DAYS = 14;
 
 /** Süre bitimine bu kadar gün kalınca "yakında bitiyor" uyarısı gösterilir. */
 export const PAYMENT_WARNING_DAYS = 7;
