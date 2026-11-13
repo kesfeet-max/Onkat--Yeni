@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Phone, User, AlertCircle, Loader2, ShieldCheck } from 'lucide-react';
+import { Phone, User, AlertCircle, Loader2, ShieldCheck, FileText, Shield } from 'lucide-react';
+import { LegalModal } from './LegalModal';
+import { KVKKContent, MusteriKosullariContent } from './LegalTexts';
 import { useAuth } from '../auth/AuthContext';
 import { toast } from '../lib/toast';
 import {
@@ -12,22 +14,37 @@ import {
   validatePhone,
 } from '../lib/validation';
 
-const TERMS_URL = 'https://onkati.com/yasal/musteri-kosullari';
-const KVKK_URL = 'https://onkati.com/yasal/kvkk';
 const CONSENT_REQUIRED_MESSAGE = 'Devam etmek için sözleşme ve KVKK onay kutucuğunu işaretlemelisiniz.';
 
-/** Yasal metni yeni sekmede açan, mobilde rahat dokunulabilen bağlantı. */
-function LegalLink({ href, children }: { href: string; children: React.ReactNode }) {
+type LegalDoc = 'terms' | 'kvkk';
+
+const LEGAL_DOCS: Record<LegalDoc, { title: string; icon: React.ReactNode; content: React.ReactNode }> = {
+  terms: {
+    title: 'Müşteri Üyelik ve Hizmet Koşulları',
+    icon: <FileText className="w-4 h-4 text-primary-700" />,
+    content: <MusteriKosullariContent />,
+  },
+  kvkk: {
+    title: 'KVKK Aydınlatma Metni',
+    icon: <Shield className="w-4 h-4 text-primary-700" />,
+    content: <KVKKContent />,
+  },
+};
+
+/** Yasal metni aynı sayfadaki modalda açan, mobilde rahat dokunulabilen bağlantı. */
+function LegalLink({ onOpen, children }: { onOpen: () => void; children: React.ReactNode }) {
   return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      onClick={(e) => e.stopPropagation()}
-      className="inline-block py-1 -my-1 font-semibold text-primary-700 [.dark_&]:text-secondary-400 underline decoration-2 decoration-primary-300 [.dark_&]:decoration-secondary-500/60 underline-offset-4 rounded-sm hover:text-primary-800 [.dark_&]:hover:text-secondary-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+    <button
+      type="button"
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onOpen();
+      }}
+      className="inline py-1 -my-1 font-semibold text-primary-700 [.dark_&]:text-secondary-400 underline decoration-2 decoration-primary-300 [.dark_&]:decoration-secondary-500/60 underline-offset-4 rounded-sm hover:text-primary-800 [.dark_&]:hover:text-secondary-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
     >
       {children}
-    </a>
+    </button>
   );
 }
 
@@ -48,6 +65,8 @@ export function CustomerPhoneAuthForm() {
   const [phoneError, setPhoneError] = useState<string | null>(null);
   const [consent, setConsent] = useState(false);
   const [consentError, setConsentError] = useState<string | null>(null);
+  const [openDoc, setOpenDoc] = useState<LegalDoc | null>(null);
+  const closeDoc = useCallback(() => setOpenDoc(null), []);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -164,8 +183,8 @@ export function CustomerPhoneAuthForm() {
           />
           <span className="text-sm text-gray-700 [.dark_&]:text-slate-300 leading-relaxed">
             Kayıt olarak{' '}
-            <LegalLink href={TERMS_URL}>Kullanım Koşulları</LegalLink>'nı ve{' '}
-            <LegalLink href={KVKK_URL}>KVKK Aydınlatma Metni</LegalLink>'ni okudum ve onaylıyorum.
+            <LegalLink onOpen={() => setOpenDoc('terms')}>Kullanım Koşulları</LegalLink>'nı ve{' '}
+            <LegalLink onOpen={() => setOpenDoc('kvkk')}>KVKK Aydınlatma Metni</LegalLink>'ni okudum ve onaylıyorum.
           </span>
         </label>
         {consentError && (
@@ -199,6 +218,15 @@ export function CustomerPhoneAuthForm() {
         Şifre veya SMS kodu gerekmez. Numaranız kayıtlıysa hesabınız açılır, değilse saniyeler içinde
         yeni hesabınız oluşturulur.
       </p>
+
+      <LegalModal
+        open={openDoc !== null}
+        title={openDoc ? LEGAL_DOCS[openDoc].title : ''}
+        icon={openDoc ? LEGAL_DOCS[openDoc].icon : null}
+        onClose={closeDoc}
+      >
+        {openDoc && LEGAL_DOCS[openDoc].content}
+      </LegalModal>
     </form>
   );
 }

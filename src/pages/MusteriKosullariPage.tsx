@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { FileText } from 'lucide-react';
 import { BrandLogo } from '../components/BrandLogo';
+import { MusteriKosullariContent } from '../components/LegalTexts';
 
 export function MusteriKosullariPage() {
   return (
@@ -22,54 +23,7 @@ export function MusteriKosullariPage() {
             </h1>
           </div>
 
-          <div className="prose prose-gray max-w-none space-y-6 text-gray-700 leading-relaxed">
-            <div>
-              <h2 className="text-lg font-heading font-bold text-primary-700 mb-3">
-                1. Taraflar ve Konu
-              </h2>
-              <p>
-                İşbu Sözleşme, Onkatı platformu ile müşteri ("Kullanıcı") arasında esnaf sadakat ve
-                indirim sisteminden yararlanma şartlarını düzenler. Kullanıcı kayıt esnasında bunu onaylar.
-              </p>
-            </div>
-
-            <div>
-              <h2 className="text-lg font-heading font-bold text-primary-700 mb-3">
-                2. Üyelik ve Güvenlik
-              </h2>
-              <p>
-                Kullanıcı verdiği bilgilerin doğru olduğunu kabul eder. Hesap güvenliği kullanıcıya aittir.
-                Kötü niyetli kullanımda Onkatı üyeliği askıya alma hakkına sahiptir.
-              </p>
-            </div>
-
-            <div>
-              <h2 className="text-lg font-heading font-bold text-primary-700 mb-3">
-                3. Hizmet Kapsamı
-              </h2>
-              <p>
-                Onkatı, yerel esnaflar ile müşterileri buluşturan aracı bir platformdur.
-                Esnafların sunduğu mal, hizmet veya fiyat politikasından Onkatı doğrudan sorumlu değildir.
-                İhtilaflarda Onkatı taraf değildir.
-              </p>
-            </div>
-
-            <div>
-              <h2 className="text-lg font-heading font-bold text-primary-700 mb-3">
-                4. Fesih ve Yetki
-              </h2>
-              <p>
-                Kullanıcı dilediği zaman hesabını kapatabilir. Uyuşmazlıklarda Türkiye Cumhuriyeti
-                kanunları geçerli olup tüketici mahkemeleri yetkilidir.
-              </p>
-            </div>
-
-            <div className="mt-8 pt-6 border-t border-gray-200">
-              <p className="text-sm text-gray-500">
-                Bu sözleşme, üyelik kaydı sırasında onaylanmış sayılır ve taraflar arasında bağlayıcıdır.
-              </p>
-            </div>
-          </div>
+          <MusteriKosullariContent />
         </div>
 
         <div className="text-center mt-6">

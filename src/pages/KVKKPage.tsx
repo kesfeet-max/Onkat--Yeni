@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { Shield } from 'lucide-react';
 import { BrandLogo } from '../components/BrandLogo';
+import { KVKKContent } from '../components/LegalTexts';
 
 export function KVKKPage() {
   return (
@@ -22,64 +23,7 @@ export function KVKKPage() {
             </h1>
           </div>
 
-          <div className="prose prose-gray max-w-none space-y-6 text-gray-700 leading-relaxed">
-            <p>
-              İşbu Aydınlatma Metni, 6698 sayılı Kişisel Verilerin Korunması Kanunu ("KVKK") uyarınca,
-              Onkatı ("Platform") tarafından veri sorumlusu sıfatıyla, esnaf sadakat sistemi kapsamında
-              üyelerimizin kişisel verilerinin işlenme şartları hakkında bilgilendirilmesi amacıyla hazırlanmıştır.
-            </p>
-
-            <div>
-              <h2 className="text-lg font-heading font-bold text-primary-700 mb-3">
-                1. İşlenen Kişisel Verileriniz
-              </h2>
-              <ul className="list-disc pl-6 space-y-2">
-                <li><strong>Kimlik Bilgileri:</strong> Ad, soyad</li>
-                <li><strong>İletişim Bilgileri:</strong> Telefon numarası, e-posta adresi</li>
-                <li><strong>İşlem Güvenliği Bilgileri:</strong> IP adresleri, log kayıtları, şifre</li>
-                <li><strong>Müşteri İşlem Bilgileri:</strong> Puan, indirim ve kampanya kullanım geçmişi</li>
-              </ul>
-            </div>
-
-            <div>
-              <h2 className="text-lg font-heading font-bold text-primary-700 mb-3">
-                2. İşlenme Amaçları
-              </h2>
-              <ul className="list-disc pl-6 space-y-2">
-                <li>Üyelik kaydının oluşturulması</li>
-                <li>Esnaf sadakat ve indirim sisteminin işletilmesi</li>
-                <li>Destek taleplerinin çözümlenmesi</li>
-                <li>Kampanya bilgilendirmeleri (açık rıza halinde)</li>
-                <li>Yasal yükümlülüklerin yerine getirilmesi</li>
-              </ul>
-            </div>
-
-            <div>
-              <h2 className="text-lg font-heading font-bold text-primary-700 mb-3">
-                3. Kişisel Verilerin Aktarımı
-              </h2>
-              <p>
-                Verileriniz kanuni yükümlülükler haricinde üçüncü kişilerle paylaşılmamakta,
-                yalnızca güvenli sunucu ve teknoloji altyapısı tedarikçileriyle muhafaza edilmektedir.
-              </p>
-            </div>
-
-            <div>
-              <h2 className="text-lg font-heading font-bold text-primary-700 mb-3">
-                4. Haklarınız (KVKK Madde 11)
-              </h2>
-              <p>
-                Verilerinizin işlenip işlenmediğini öğrenme, bilgi talep etme, düzeltilmesini
-                veya silinmesini isteme haklarına sahipsiniz.
-              </p>
-            </div>
-
-            <div className="mt-8 pt-6 border-t border-gray-200">
-              <p className="text-sm text-gray-500">
-                Bu metin, 6698 sayılı KVKK'nın 10. maddesi gereğince aydınlatma yükümlülüğü kapsamında hazırlanmıştır.
-              </p>
-            </div>
-          </div>
+          <KVKKContent />
         </div>
 
         <div className="text-center mt-6">
